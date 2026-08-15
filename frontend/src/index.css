@@ -1,0 +1,64 @@
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --ink: #14213d;
+  --ink-light: #1c2d4f;
+  --ink-lighter: #263a61;
+  --paper: #ede6d6;
+  --paper-dark: #ddd3bc;
+  --cream: #f3efe3;
+  --rust: #b5432f;
+  --rust-dark: #8a3122;
+  --forest: #2f6f4e;
+  --forest-dark: #21503a;
+  --brass: #c9a15f;
+  --ink-muted: #6b6355;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  font-family: "Inter", system-ui, sans-serif;
+  background-color: var(--ink);
+  color: var(--cream);
+  -webkit-font-smoothing: antialiased;
+}
+
+.font-display {
+  font-family: "Fraunces", Georgia, serif;
+}
+
+.font-mono {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+}
+
+/* Perforated ticket-stub edge: a row of paper-colored "punch holes" cut
+   into the card's left edge, echoing a real claim-check / coat-check
+   ticket. Used by IDCard.tsx as the app's one signature visual device. */
+.ticket-perforation {
+  background-image: radial-gradient(
+    circle at 0 6px,
+    var(--ink) 4px,
+    transparent 4.5px
+  );
+  background-size: 100% 16px;
+  background-repeat: repeat-y;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .stamp-badge {
+    transition: transform 0.15s ease;
+  }
+}

@@ -1,0 +1,58 @@
+name: Deploy IDFinder1
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write   # required for OIDC -> AWS
+  contents: read
+
+env:
+  AWS_REGION: eu-north-1
+  TF_VAR_github_repo: ericsonasamoah3/IDFinder1
+  TF_VAR_github_branch: master
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: terraform
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.15.8"
+
+      - name: Terraform fmt check
+        run: terraform fmt -check -recursive
+        continue-on-error: true # don't block deploys over formatting
+
+      - name: Terraform init
+        run: terraform init
+
+      - name: Terraform plan
+        env:
+          TF_VAR_github_access_token: ${{ secrets.GH_ACCESS_TOKEN }}
+          TF_VAR_ocr_api_key: ${{ secrets.OCR_API_KEY }}
+        run: terraform plan -out=tfplan
+
+      - name: Terraform apply
+        env:
+          TF_VAR_github_access_token: ${{ secrets.GH_ACCESS_TOKEN }}
+          TF_VAR_ocr_api_key: ${{ secrets.OCR_API_KEY }}
+        run: terraform apply -auto-approve tfplan
+
+      - name: Show outputs
+        run: terraform output
