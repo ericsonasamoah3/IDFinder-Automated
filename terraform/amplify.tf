@@ -32,10 +32,10 @@ resource "aws_amplify_app" "frontend" {
   EOT
 
   environment_variables = {
-    VITE_IDFINDER_API_BASE     = aws_apigatewayv2_stage.default.invoke_url
-    VITE_ID_PROCESS            = "${aws_apigatewayv2_stage.default.invoke_url}/process"
-    VITE_ID_SAVE                = "${aws_apigatewayv2_stage.default.invoke_url}/save"
-    AMPLIFY_MONOREPO_APP_ROOT  = "frontend"
+    VITE_IDFINDER_API_BASE    = aws_apigatewayv2_stage.default.invoke_url
+    VITE_ID_PROCESS           = "${aws_apigatewayv2_stage.default.invoke_url}/process"
+    VITE_ID_SAVE              = "${aws_apigatewayv2_stage.default.invoke_url}/save"
+    AMPLIFY_MONOREPO_APP_ROOT = "frontend"
     # VITE_COGNITO_* vars are intentionally NOT set here -- see
     # null_resource.amplify_cognito_env below for why.
   }
@@ -66,10 +66,10 @@ resource "aws_amplify_branch" "master" {
 # both of which have AWS credentials already.
 locals {
   amplify_env_vars = {
-    VITE_IDFINDER_API_BASE    = aws_apigatewayv2_stage.default.invoke_url
-    VITE_ID_PROCESS           = "${aws_apigatewayv2_stage.default.invoke_url}/process"
+    VITE_IDFINDER_API_BASE     = aws_apigatewayv2_stage.default.invoke_url
+    VITE_ID_PROCESS            = "${aws_apigatewayv2_stage.default.invoke_url}/process"
     VITE_ID_SAVE               = "${aws_apigatewayv2_stage.default.invoke_url}/save"
-    AMPLIFY_MONOREPO_APP_ROOT = "frontend"
+    AMPLIFY_MONOREPO_APP_ROOT  = "frontend"
     VITE_COGNITO_USER_POOL_ID  = aws_cognito_user_pool.main.id
     VITE_COGNITO_CLIENT_ID     = aws_cognito_user_pool_client.web.id
     VITE_COGNITO_DOMAIN        = "${aws_cognito_user_pool_domain.main.domain}.auth.${var.aws_region}.amazoncognito.com"

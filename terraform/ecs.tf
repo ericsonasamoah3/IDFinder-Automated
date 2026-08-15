@@ -92,8 +92,8 @@ resource "aws_ecs_service" "ocr" {
 
   load_balancer {
     target_group_arn = aws_lb_target_group.ocr.arn
-    container_name    = "ocr"
-    container_port    = var.ocr_container_port
+    container_name   = "ocr"
+    container_port   = var.ocr_container_port
   }
 
   depends_on = [aws_lb_listener.ocr]

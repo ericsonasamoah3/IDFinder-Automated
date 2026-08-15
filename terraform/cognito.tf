@@ -32,8 +32,8 @@ resource "aws_cognito_user_pool_client" "web" {
 
   generate_secret = false
 
-  allowed_oauth_flows                 = ["code"]
-  allowed_oauth_scopes                = ["openid", "email"]
+  allowed_oauth_flows                  = ["code"]
+  allowed_oauth_scopes                 = ["openid", "email"]
   allowed_oauth_flows_user_pool_client = true
 
   supported_identity_providers = ["COGNITO"]
@@ -43,5 +43,8 @@ resource "aws_cognito_user_pool_client" "web" {
     "https://${var.github_branch}.${aws_amplify_app.frontend.default_domain}",
   ]
 
-  logout_urls = callback_urls
+  logout_urls = [
+    var.local_dev_url,
+    "https://${var.github_branch}.${aws_amplify_app.frontend.default_domain}",
+  ]
 }
