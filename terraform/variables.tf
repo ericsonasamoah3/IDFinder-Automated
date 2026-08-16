@@ -19,7 +19,7 @@ variable "environment" {
 variable "github_repo" {
   description = "GitHub repo in 'owner/name' form, used for OIDC trust and Amplify"
   type        = string
-  default     = "ericsonasamoah3/IDFinder1"
+  default     = "ericsonasamoah3/IDFinder-Automated"
 }
 
 variable "create_github_oidc_provider" {
