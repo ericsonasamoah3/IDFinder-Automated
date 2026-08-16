@@ -1,90 +1,238 @@
-# AWS accounts can only have ONE GitHub OIDC provider total (the URL is
-# always the same regardless of repo), so if you've set one up before for
-# a different project, creating a second one here will fail with
-# EntityAlreadyExists. Set create_github_oidc_provider = false and
-# existing_github_oidc_provider_arn = "<arn>" in that case (find it with:
-# aws iam list-open-id-connect-providers).
+# -------------------------------------------------------------------
+# GitHub Actions OIDC
+# -------------------------------------------------------------------
+
+# AWS accounts can only have ONE GitHub Actions OIDC provider for:
+# https://token.actions.githubusercontent.com
+#
+# If the provider already exists in the AWS account, set:
+#
+#   create_github_oidc_provider = false
+#
+# and provide its ARN through:
+#
+#   existing_github_oidc_provider_arn
+#
+# Existing provider ARN:
+#
+# arn:aws:iam::258506450105:oidc-provider/token.actions.githubusercontent.com
+#
+# Repository:
+#
+# ericsonasamoah3/IDFinder-Automated
+#
+# Branch:
+#
+# master
+#
+# IMPORTANT:
+# The actual GitHub OIDC token for this repository has been verified
+# and contains this exact subject:
+#
+# repo:ericsonasamoah3@84795350/IDFinder-Automated@1335494099:ref:refs/heads/master
+#
+# The trust policy below MUST match that exact subject.
 
 resource "aws_iam_openid_connect_provider" "github" {
   count = var.create_github_oidc_provider ? 1 : 0
 
-  url             = "https://token.actions.githubusercontent.com"
-  client_id_list  = ["sts.amazonaws.com"]
-  thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"]
+  url = "https://token.actions.githubusercontent.com"
+
+  client_id_list = [
+    "sts.amazonaws.com"
+  ]
+
+  thumbprint_list = [
+    "6938fd4d98bab03faadb97b34396831e3780aea1"
+  ]
 }
 
 locals {
   github_oidc_provider_arn = var.create_github_oidc_provider ? aws_iam_openid_connect_provider.github[0].arn : var.existing_github_oidc_provider_arn
 }
 
+# -------------------------------------------------------------------
+# GitHub Actions OIDC trust policy
+# -------------------------------------------------------------------
+
 data "aws_iam_policy_document" "github_oidc_assume" {
   statement {
-    actions = ["sts:AssumeRoleWithWebIdentity"]
+    effect = "Allow"
+
+    actions = [
+      "sts:AssumeRoleWithWebIdentity"
+    ]
 
     principals {
-      type        = "Federated"
-      identifiers = [local.github_oidc_provider_arn]
+      type = "Federated"
+
+      identifiers = [
+        local.github_oidc_provider_arn
+      ]
     }
 
+    # GitHub Actions audience.
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:aud"
-      values   = ["sts.amazonaws.com"]
+
+      values = [
+        "sts.amazonaws.com"
+      ]
     }
 
+    # IMPORTANT:
+    # This is the EXACT subject returned by the GitHub OIDC token
+    # observed from this repository.
+    #
+    # Do NOT replace this with:
+    #
+    # repo:${var.github_repo}:ref:refs/heads/${var.github_branch}
+    #
+    # because the actual token issued to this repository includes
+    # the repository-owner ID and repository ID.
     condition {
-      test     = "StringLike"
+      test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repo}:*"]
+
+      values = [
+        "repo:ericsonasamoah3@84795350/IDFinder-Automated@1335494099:ref:refs/heads/master"
+      ]
     }
   }
 }
 
 resource "aws_iam_role" "github_deploy" {
-  name               = "${var.project_name}-github-deploy"
+  name = "${var.project_name}-github-deploy"
+
   assume_role_policy = data.aws_iam_policy_document.github_oidc_assume.json
 }
 
-# Broad-ish policy scoped to this project's resource types, needed because
-# Terraform manages VPC/ECS/ALB/DynamoDB/Lambda/API Gateway/Cognito/Amplify/
-# S3/SNS/SSM/IAM for this stack. Tighter than IAMFullAccess.
+# -------------------------------------------------------------------
+# GitHub Actions Terraform deployment permissions
+# -------------------------------------------------------------------
+
 resource "aws_iam_role_policy" "github_deploy" {
   name = "${var.project_name}-github-deploy-policy"
   role = aws_iam_role.github_deploy.id
 
   policy = jsonencode({
     Version = "2012-10-17"
+
     Statement = [
       {
         Effect = "Allow"
+
         Action = [
+          # ---------------------------------------------------------
+          # EC2 / VPC
+          # ---------------------------------------------------------
           "ec2:*",
+
+          # ---------------------------------------------------------
+          # ECS / Fargate
+          # ---------------------------------------------------------
           "ecs:*",
+
+          # ---------------------------------------------------------
+          # Application Load Balancer
+          # ---------------------------------------------------------
           "elasticloadbalancing:*",
+
+          # ---------------------------------------------------------
+          # DynamoDB
+          # ---------------------------------------------------------
           "dynamodb:*",
+
+          # ---------------------------------------------------------
+          # Lambda
+          # ---------------------------------------------------------
           "lambda:*",
+
+          # ---------------------------------------------------------
+          # API Gateway
+          # ---------------------------------------------------------
           "apigateway:*",
+
+          # ---------------------------------------------------------
+          # Cognito
+          # ---------------------------------------------------------
           "cognito-idp:*",
+
+          # ---------------------------------------------------------
+          # Amplify
+          # ---------------------------------------------------------
           "amplify:*",
+
+          # ---------------------------------------------------------
+          # S3
+          # ---------------------------------------------------------
           "s3:*",
+
+          # ---------------------------------------------------------
+          # SNS
+          # ---------------------------------------------------------
           "sns:*",
+
+          # ---------------------------------------------------------
+          # SSM Parameter Store
+          # ---------------------------------------------------------
           "ssm:*",
+
+          # ---------------------------------------------------------
+          # CloudWatch Logs
+          # ---------------------------------------------------------
           "logs:*",
+
+          # ---------------------------------------------------------
+          # IAM
+          # ---------------------------------------------------------
+
+          # Read IAM roles.
           "iam:GetRole",
           "iam:GetRolePolicy",
-          "iam:CreateRole",
-          "iam:DeleteRole",
-          "iam:PutRolePolicy",
-          "iam:DeleteRolePolicy",
-          "iam:AttachRolePolicy",
-          "iam:DetachRolePolicy",
-          "iam:PassRole",
-          "iam:TagRole",
           "iam:ListRolePolicies",
           "iam:ListAttachedRolePolicies",
+
+          # Create/delete IAM roles.
+          "iam:CreateRole",
+          "iam:DeleteRole",
+
+          # Update IAM role trust policies.
+          "iam:UpdateAssumeRolePolicy",
+
+          # Manage inline IAM policies.
+          "iam:PutRolePolicy",
+          "iam:DeleteRolePolicy",
+
+          # Manage managed-policy attachments.
+          "iam:AttachRolePolicy",
+          "iam:DetachRolePolicy",
+
+          # Pass roles to AWS services.
+          "iam:PassRole",
+
+          # Tag IAM roles.
+          "iam:TagRole",
+
+          # ---------------------------------------------------------
+          # GitHub OIDC provider
+          # ---------------------------------------------------------
+
+          # Terraform must be able to inspect the existing provider.
+          "iam:GetOpenIDConnectProvider",
+
+          # Included because Terraform manages this resource when
+          # create_github_oidc_provider = true.
+          "iam:CreateOpenIDConnectProvider",
+          "iam:UpdateOpenIDConnectProvider",
+          "iam:DeleteOpenIDConnectProvider",
+          "iam:TagOpenIDConnectProvider",
+          "iam:UntagOpenIDConnectProvider"
         ]
+
         Resource = "*"
-      },
+      }
     ]
   })
 }
@@ -95,21 +243,26 @@ resource "aws_iam_role_policy" "github_deploy" {
 
 # ECS task execution role.
 #
-# This is assumed by the ECS/Fargate agent and allows the task to:
-# - pull images
+# This role is assumed by the ECS/Fargate agent and allows the task
+# to:
+# - pull container images
 # - write logs to CloudWatch
 # - retrieve secrets referenced by the task definition
+
 resource "aws_iam_role" "ecs_execution" {
   name = "${var.project_name}-ecs-execution"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
+
     Statement = [
       {
         Effect = "Allow"
+
         Principal = {
           Service = "ecs-tasks.amazonaws.com"
         }
+
         Action = "sts:AssumeRole"
       }
     ]
@@ -122,41 +275,49 @@ resource "aws_iam_role_policy_attachment" "ecs_execution_policy" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
-# Allows the ECS execution role to retrieve the OCR API key
-# referenced by the ECS task definition.
+# Allows the ECS execution role to retrieve the OCR API key.
 resource "aws_iam_role_policy" "ecs_execution_ssm" {
   name = "${var.project_name}-ecs-execution-ssm"
   role = aws_iam_role.ecs_execution.id
 
   policy = jsonencode({
     Version = "2012-10-17"
+
     Statement = [
       {
         Effect = "Allow"
+
         Action = [
           "ssm:GetParameter",
           "ssm:GetParameters"
         ]
+
         Resource = aws_ssm_parameter.ocr_api_key.arn
       }
     ]
   })
 }
 
-# ECS application/task role.
-#
-# This is assumed by the actual OCR container.
+# -------------------------------------------------------------------
+# ECS application/task IAM role
+# -------------------------------------------------------------------
+
+# This role is assumed by the actual OCR container.
+
 resource "aws_iam_role" "ecs_task" {
   name = "${var.project_name}-ecs-task"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
+
     Statement = [
       {
         Effect = "Allow"
+
         Principal = {
           Service = "ecs-tasks.amazonaws.com"
         }
+
         Action = "sts:AssumeRole"
       }
     ]
@@ -164,19 +325,23 @@ resource "aws_iam_role" "ecs_task" {
 }
 
 # Application permissions for the OCR task.
+
 resource "aws_iam_role_policy" "ecs_task_policy" {
   name = "${var.project_name}-ecs-task-policy"
   role = aws_iam_role.ecs_task.id
 
   policy = jsonencode({
     Version = "2012-10-17"
+
     Statement = [
       {
         Effect = "Allow"
+
         Action = [
           "ssm:GetParameter",
           "ssm:GetParameters"
         ]
+
         Resource = aws_ssm_parameter.ocr_api_key.arn
       }
     ]
