@@ -34,9 +34,13 @@ resource "aws_cloudwatch_log_group" "ocr" {
 
 # API_KEY is stored in SSM, not baked into the task definition in plaintext.
 resource "aws_ssm_parameter" "ocr_api_key" {
-  name  = "/${var.project_name}/ocr/api_key"
-  type  = "SecureString"
-  value = var.ocr_api_key
+  name = "/${var.project_name}/ocr/api_key"
+  type = "SecureString"
+  # trimspace, not the raw var: a trailing newline (easy to introduce via a
+  # GitHub secret or a shell heredoc) rides through SSM into the container's
+  # Authorization header, and httpx rejects it outright with
+  # "Illegal header value" before the request is ever sent.
+  value = trimspace(var.ocr_api_key)
 }
 
 resource "aws_ecs_task_definition" "ocr" {

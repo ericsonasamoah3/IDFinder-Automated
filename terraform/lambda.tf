@@ -117,7 +117,10 @@ resource "aws_lambda_function" "process" {
 
   environment {
     variables = {
-      CONTAINER_URL = "http://${aws_lb.ocr.dns_name}/"
+      # The ocr123 image is a SageMaker-style inference container: it serves
+      # GET /ping for health and POST /invocations for work. Pointing at "/"
+      # returned 404 from the container itself.
+      CONTAINER_URL = "http://${aws_lb.ocr.dns_name}/invocations"
       # Access-Control-Allow-Origin only accepts one value (or "*"), so this
       # only works correctly with the default single "*" entry. If you set
       # cors_allowed_origins to multiple specific origins, you'd need the

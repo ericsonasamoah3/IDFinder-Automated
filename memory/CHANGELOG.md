@@ -147,3 +147,32 @@ AWS console actions, and decisions made *not* to do something.
 - **.github/workflows/deploy.yml** — removed the temporary OIDC debug step now
   that the correct subject is confirmed; left a comment explaining how to
   re-add it and why this repo's subject claim is non-standard.
+
+### Image upload: two further bugs behind the port mismatch
+
+Once the port was fixed and the container was finally reachable, `/process`
+returned 500 and two more faults surfaced that the port problem had been
+masking.
+
+- **terraform/lambda.tf** — `CONTAINER_URL` now points at `/invocations`, not
+  `/`. The ocr123 image is a SageMaker-style inference container (gunicorn on
+  8080, `/opt/program`): it serves `GET /ping` for health and `POST
+  /invocations` for work. Probing through the ALB confirmed `/` → 404,
+  `/ping` → 200, `/invocations` → 405 on GET. The Lambda was POSTing to `/`
+  and getting a 404 back.
+- **terraform/ecs.tf** — `value = trimspace(var.ocr_api_key)` on the SSM
+  parameter. The stored key carried a trailing newline, which rode through into
+  the container's `Authorization: Bearer ...` header; httpx rejected it with
+  `LocalProtocolError: Illegal header value` and the Groq call failed before
+  leaving the container.
+- **terraform/alb.tf** — health check moved from `/` (matcher `200-499`) to
+  `/ping` (matcher `200`). The old check passed on the container's 404, so it
+  proved only that something was listening, not that the app was healthy.
+
+### SECURITY: Groq API key leaked into CloudWatch
+
+- The container's stack trace printed the full `Bearer` token into the
+  `/ecs/idfinder1-ocr` log group, which retains 14 days and is readable by
+  anyone with CloudWatch access. **The Groq key must be rotated**, and the new
+  value set in the `OCR_API_KEY` GitHub secret. `trimspace` prevents the
+  newline recurring but does nothing about the already-exposed key.

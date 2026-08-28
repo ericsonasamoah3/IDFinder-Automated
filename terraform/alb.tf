@@ -54,8 +54,8 @@ resource "aws_lb_target_group" "ocr" {
   target_type = "ip"
 
   health_check {
-    path                = "/"
-    matcher             = "200-499" # OCR container may 404/405 root GET; ECS-level health, not app-level
+    path                = "/ping"
+    matcher             = "200" # /ping is the container's real health route; "/" 404s
     interval            = 30
     timeout             = 10
     healthy_threshold   = 2
