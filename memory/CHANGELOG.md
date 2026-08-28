@@ -137,3 +137,13 @@ AWS console actions, and decisions made *not* to do something.
 - **Recovery requires a manual step**: CI cannot repair its own trust policy, so
   the live role must be corrected with `aws iam update-assume-role-policy`
   before any further CI run can authenticate.
+
+### Recovery completed
+
+- **Live trust policy restored manually** (`aws iam update-assume-role-policy`),
+  putting the `@`-style subject back on `idfinder1-github-deploy`. Confirmed
+  live. This had to be done outside CI because CI cannot authenticate to repair
+  its own trust policy.
+- **.github/workflows/deploy.yml** — removed the temporary OIDC debug step now
+  that the correct subject is confirmed; left a comment explaining how to
+  re-add it and why this repo's subject claim is non-standard.
