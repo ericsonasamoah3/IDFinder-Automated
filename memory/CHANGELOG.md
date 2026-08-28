@@ -183,3 +183,26 @@ masking.
   and the task kept serving with the stale key. This makes any key change roll
   the task definition and force a fresh deployment. Also means rotating the
   Groq key will actually take effect on the next apply.
+
+### Verified working — image upload fixed
+
+End-to-end confirmation at 17:55 UTC, after CI runs `029dd26` and `3419c7d`:
+
+- `POST /process` with a test JPEG returns
+  `{"success": true, "name_on_id": "", "id_type": "other", "id_number_hint": ""}`.
+  Empty fields are correct for a 1x1 blank test image; `success: true` means the
+  whole chain runs (API Gateway -> Lambda -> ALB -> container -> Groq).
+- ECS task definition rolled 8 -> 9 via the `API_KEY_VERSION` pin, SSM parameter
+  at version 3 after `trimspace`. The earlier 500 was the old task still holding
+  the newline-carrying key in its environment — env vars can't be fixed in
+  place, only replaced, which is exactly what the version pin forces.
+- Target group `idfocre08938d5a86b57586e0253619f` on 8080, target healthy,
+  `GET /ping` -> 200.
+- `GET /IDfinder` returns 200 with `{"success": true, "items": []}`.
+
+**Not verified:** the `PUBLIC_FIELDS` redaction. The table is empty, so the
+check for leaked `id_number_hint` / `reporter_*` fields was vacuous. Confirmed
+by code inspection only — worth re-checking once real records exist.
+
+**Still outstanding:** rotate the Groq API key (leaked into CloudWatch, see
+above), and the deferred design items listed earlier.
