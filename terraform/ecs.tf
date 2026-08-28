@@ -69,6 +69,17 @@ resource "aws_ecs_task_definition" "ocr" {
           valueFrom = aws_ssm_parameter.ocr_api_key.arn
         }
       ]
+      # The container reads API_KEY from SSM once, at task start. Changing the
+      # SSM value alone produces no new task definition revision, so ECS never
+      # redeploys and the task keeps serving with the stale key. Pinning the
+      # parameter's version here makes any key change roll the task definition,
+      # which forces a fresh deployment that re-reads the secret.
+      environment = [
+        {
+          name  = "API_KEY_VERSION"
+          value = tostring(aws_ssm_parameter.ocr_api_key.version)
+        }
+      ]
       logConfiguration = {
         logDriver = "awslogs"
         options = {

@@ -176,3 +176,10 @@ masking.
   anyone with CloudWatch access. **The Groq key must be rotated**, and the new
   value set in the `OCR_API_KEY` GitHub secret. `trimspace` prevents the
   newline recurring but does nothing about the already-exposed key.
+- **terraform/ecs.tf** — task definition now carries an `API_KEY_VERSION`
+  environment variable pinned to `aws_ssm_parameter.ocr_api_key.version`. The
+  container reads `API_KEY` from SSM once at task start, so changing the SSM
+  value alone produced no new task definition revision, ECS never redeployed,
+  and the task kept serving with the stale key. This makes any key change roll
+  the task definition and force a fresh deployment. Also means rotating the
+  Groq key will actually take effect on the next apply.
