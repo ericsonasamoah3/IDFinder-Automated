@@ -284,10 +284,9 @@ export default function ReportFound() {
 
               {/* Last 4 */}
               <div className="space-y-2">
-                <Label>Last 4 Digits *</Label>
+                <Label>Last 4 of ID Number *</Label>
                 <Input
                   required
-                  inputMode="numeric"
                   value={formData.id_number_hint}
                   maxLength={4}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) =>

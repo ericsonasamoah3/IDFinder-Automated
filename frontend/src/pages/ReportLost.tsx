@@ -307,10 +307,9 @@ export default function ReportLost() {
 
               {/* Last 4 */}
               <div className="space-y-2">
-                <Label>Last 4 Digits *</Label>
+                <Label>Last 4 of ID Number *</Label>
                 <Input
                   required
-                  inputMode="numeric"
                   maxLength={4}
                   value={formData.id_number_hint}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) =>

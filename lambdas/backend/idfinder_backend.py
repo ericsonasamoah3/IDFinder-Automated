@@ -215,10 +215,15 @@ def build_record(body):
     if not location:
         raise ValidationError("location is required")
 
-    # Matching compares match_key by exact string equality, so an
-    # unnormalised hint ("1234 " vs "1234") silently fails to match. Reduce
-    # to digits and take the last 4, which is what both report forms ask for.
-    id_number_hint = re.sub(r"\D", "", id_number_hint)[-4:]
+    # Matching compares match_key by exact string equality, so an unnormalised
+    # hint ("1234 " vs "1234", "ksab" vs "KSAB") silently fails to match.
+    # Strip separators, upper-case, take the last 4.
+    #
+    # Alphanumeric, NOT digits-only: plenty of ID numbers end in letters -- a
+    # UK driving licence like ASAMO712049EK9AB ends "EK9AB". Stripping to
+    # digits turned those into an empty hint and rejected the submission with
+    # "id_number_hint is required", on a value the OCR had just auto-filled.
+    id_number_hint = re.sub(r"[^A-Za-z0-9]", "", id_number_hint).upper()[-4:]
     if not id_number_hint:
         raise ValidationError(
             "id_number_hint is required -- matching relies on it, and a "
