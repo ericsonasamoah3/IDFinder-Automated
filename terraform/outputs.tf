@@ -46,3 +46,12 @@ output "dynamodb_table_name" {
 output "uploads_bucket_name" {
   value = aws_s3_bucket.uploads.bucket
 }
+
+output "save_jobs_queue_url" {
+  value = aws_sqs_queue.save_jobs.id
+}
+
+output "save_dlq_url" {
+  description = "Failed image-save jobs land here. Inspect with: aws sqs receive-message --queue-url <this>"
+  value       = aws_sqs_queue.save_dlq.id
+}

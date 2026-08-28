@@ -81,3 +81,9 @@ variable "cors_allowed_origins" {
   type        = list(string)
   default     = ["*"]
 }
+
+variable "save_job_max_receives" {
+  description = "How many times an image-save job is retried before SQS moves it to the dead-letter queue. Low on purpose: these failures are almost always a bad payload or a missing permission, and retrying those 10 times just delays the trip to the DLQ."
+  type        = number
+  default     = 3
+}

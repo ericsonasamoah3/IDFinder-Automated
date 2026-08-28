@@ -14,6 +14,12 @@ data "archive_file" "ocr_process_zip" {
   output_path = "${path.module}/build/ocr_backend.zip"
 }
 
+data "archive_file" "save_worker_zip" {
+  type        = "zip"
+  source_file = "${path.module}/../lambdas/save_worker/idfinder_save_worker.py"
+  output_path = "${path.module}/build/idfinder_save_worker.zip"
+}
+
 data "archive_file" "save_zip" {
   type        = "zip"
   source_file = "${path.module}/../lambdas/save/idfinder_save.py"
@@ -159,6 +165,11 @@ resource "aws_iam_role_policy" "save_permissions" {
         Action   = ["s3:PutObject", "s3:GetObject"]
         Resource = "${aws_s3_bucket.uploads.arn}/*"
       },
+      {
+        Effect   = "Allow"
+        Action   = ["sqs:SendMessage"]
+        Resource = aws_sqs_queue.save_jobs.arn
+      },
     ]
   })
 }
@@ -176,6 +187,7 @@ resource "aws_lambda_function" "save" {
     variables = {
       BUCKET_NAME    = aws_s3_bucket.uploads.bucket
       ALLOWED_ORIGIN = var.cors_allowed_origins[0]
+      SAVE_QUEUE_URL = aws_sqs_queue.save_jobs.id
     }
   }
 }
@@ -320,4 +332,83 @@ resource "aws_cloudwatch_log_group" "process" {
 resource "aws_cloudwatch_log_group" "save" {
   name              = "/aws/lambda/${aws_lambda_function.save.function_name}"
   retention_in_days = 14
+}
+
+# ---------------------------------------------------------------------------
+# idfinder_save_worker -- SQS consumer that does the actual archiving
+#
+# Split out from the /save request path so a slow or failing S3 write does
+# not hold the browser request open, and so a failed job is retried by SQS
+# and lands in the DLQ rather than disappearing into a 500.
+# ---------------------------------------------------------------------------
+
+resource "aws_iam_role" "save_worker_lambda" {
+  name               = "${var.project_name}-save-worker-lambda"
+  assume_role_policy = data.aws_iam_policy_document.lambda_assume.json
+}
+
+resource "aws_iam_role_policy_attachment" "save_worker_basic" {
+  role       = aws_iam_role.save_worker_lambda.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy" "save_worker_permissions" {
+  name = "${var.project_name}-save-worker-permissions"
+  role = aws_iam_role.save_worker_lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        # GetObject for the copy source, PutObject for the final object and
+        # the JSON sidecar, DeleteObject to clear the staged upload.
+        Action   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+        Resource = "${aws_s3_bucket.uploads.arn}/*"
+      },
+      {
+        Effect = "Allow"
+        # Required by the event source mapping, which polls on the
+        # function's behalf rather than the function calling SQS itself.
+        Action = [
+          "sqs:ReceiveMessage",
+          "sqs:DeleteMessage",
+          "sqs:GetQueueAttributes",
+        ]
+        Resource = aws_sqs_queue.save_jobs.arn
+      },
+    ]
+  })
+}
+
+resource "aws_lambda_function" "save_worker" {
+  function_name    = "${var.project_name}-save-worker"
+  role             = aws_iam_role.save_worker_lambda.arn
+  handler          = "idfinder_save_worker.lambda_handler"
+  runtime          = "python3.13"
+  timeout          = 30 # queue visibility_timeout_seconds is 6x this
+  filename         = data.archive_file.save_worker_zip.output_path
+  source_code_hash = data.archive_file.save_worker_zip.output_base64sha256
+
+  environment {
+    variables = {
+      BUCKET_NAME = aws_s3_bucket.uploads.bucket
+    }
+  }
+}
+
+resource "aws_cloudwatch_log_group" "save_worker" {
+  name              = "/aws/lambda/${aws_lambda_function.save_worker.function_name}"
+  retention_in_days = 14
+}
+
+resource "aws_lambda_event_source_mapping" "save_worker" {
+  event_source_arn = aws_sqs_queue.save_jobs.arn
+  function_name    = aws_lambda_function.save_worker.arn
+  batch_size       = 10
+
+  # Without this, one bad job in a batch forces redelivery of the whole
+  # batch, including jobs that already wrote their objects. The handler
+  # returns batchItemFailures to name only the messages that actually failed.
+  function_response_types = ["ReportBatchItemFailures"]
 }

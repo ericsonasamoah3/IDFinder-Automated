@@ -1,25 +1,31 @@
 """
-Handles POST /save -- archives an ID photo and its OCR output to S3.
+POST /save -- accepts an ID photo, then hands the archiving work to SQS.
 
-Layout in the bucket, keyed by the name printed on the ID:
+This Lambda is the PRODUCER. It does the fast, request-path work only:
 
-    lost/ERICSON_KOFI_ASAMOAH.jpg          <- the photo
-    lost/json/ERICSON_KOFI_ASAMOAH.json    <- the OCR output for it
-    found/JANE_DOE.jpg
-    found/json/JANE_DOE.json
+  1. validate the payload
+  2. work out the final S3 key from the name on the ID
+  3. drop the raw bytes at incoming/<uuid>.jpg
+  4. enqueue a small job message
+  5. return 202 immediately
 
-Each of `lost/` and `found/` holds that side's photos directly, with the
-matching OCR JSON alongside in a `json/` subfolder under the same base
-filename, so a photo and its extracted data are always findable from each
-other.
+The actual archiving -- final naming, the JSON sidecar, cleanup -- happens in
+idfinder_save_worker.py, triggered by the queue. See that module for the
+layout it writes.
 
-The frontend calls this right before submitting a lost/found report if the
-user attached a photo. It is intentionally decoupled from the DynamoDB
-write in idfinder_backend.py: a failed image save shouldn't block a report,
-and a report shouldn't require a photo.
+Why the bytes go to S3 rather than into the message: SQS caps a message at
+256 KB and uploads here can reach 8 MB, so the image cannot travel in the
+message body. This is the "claim check" pattern -- store the payload, pass a
+pointer. The message carries only the pointer plus small metadata.
+
+What decoupling buys: a slow or failing S3 write no longer holds the browser
+request open, and a job that fails is retried by SQS and lands in the
+dead-letter queue after MAX_RECEIVES attempts instead of vanishing into a
+500 the user never sees again.
 
 Environment variables required:
-  BUCKET_NAME - S3 bucket to store uploaded ID photos in
+  BUCKET_NAME    - S3 bucket to store uploaded ID photos in
+  SAVE_QUEUE_URL - SQS queue the worker consumes from
 """
 
 import base64
@@ -33,11 +39,13 @@ import boto3
 from botocore.exceptions import ClientError
 
 BUCKET_NAME = os.environ["BUCKET_NAME"]
+SAVE_QUEUE_URL = os.environ["SAVE_QUEUE_URL"]
 ALLOWED_ORIGIN = os.environ.get("ALLOWED_ORIGIN", "*")
 MAX_IMAGE_BYTES = 8 * 1024 * 1024  # 8 MB guard against oversized uploads
 MAX_NAME_LEN = 80  # keep keys readable; S3 itself allows far more
 
 s3 = boto3.client("s3")
+sqs = boto3.client("sqs")
 
 
 def lambda_handler(event, context):
@@ -61,33 +69,50 @@ def lambda_handler(event, context):
             return response(400, {"error": "Image exceeds 8MB limit"})
 
         base = ensure_unique(form_type, safe_filename(name_on_id))
-
         image_key = f"{form_type}/{base}.jpg"
+        json_key = f"{form_type}/json/{base}.json" if ocr_json is not None else None
+
+        # Claim check: park the bytes, pass a pointer.
+        staging_key = f"incoming/{uuid.uuid4()}.jpg"
         s3.put_object(
             Bucket=BUCKET_NAME,
-            Key=image_key,
+            Key=staging_key,
             Body=image_bytes,
             ContentType="image/jpeg",
             ServerSideEncryption="AES256",
         )
 
-        json_key = None
-        if ocr_json is not None:
-            json_key = f"{form_type}/json/{base}.json"
-            s3.put_object(
-                Bucket=BUCKET_NAME,
-                Key=json_key,
-                Body=json.dumps(ocr_json, indent=2).encode("utf-8"),
-                ContentType="application/json",
-                ServerSideEncryption="AES256",
-            )
+        job_id = str(uuid.uuid4())
+        sqs.send_message(
+            QueueUrl=SAVE_QUEUE_URL,
+            MessageBody=json.dumps(
+                {
+                    "job_id": job_id,
+                    "staging_key": staging_key,
+                    "image_key": image_key,
+                    "json_key": json_key,
+                    "ocr_json": ocr_json,
+                }
+            ),
+        )
 
-        return response(200, {"success": True, "key": image_key, "json_key": json_key})
+        # 202, not 200: the object is not at image_key yet. The key is
+        # returned anyway so the caller can record it against the report --
+        # the worker writes to exactly this key.
+        return response(
+            202,
+            {
+                "success": True,
+                "key": image_key,
+                "json_key": json_key,
+                "job_id": job_id,
+            },
+        )
 
     except Exception as e:  # noqa: BLE001
         # Log the detail, return a generic message -- str(e) leaked bucket
         # names and boto internals to a public, unauthenticated endpoint.
-        print(f"Image save failed: {e}")
+        print(f"Enqueue of image save failed: {e}")
         return response(500, {"success": False, "error": "Could not save the image."})
 
 
@@ -118,6 +143,11 @@ def ensure_unique(form_type, base):
     Two different people genuinely can share a name, and the same person can
     report more than once. Without this, a second upload would replace the
     first one's photo and JSON with no trace that it had happened.
+
+    This runs in the producer so the caller can be told the final key
+    synchronously. Two uploads of the same name landing within the same
+    instant can still both see the name as free; that is a narrow race and
+    the loser is overwritten rather than lost.
     """
     try:
         s3.head_object(Bucket=BUCKET_NAME, Key=f"{form_type}/{base}.jpg")

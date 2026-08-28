@@ -118,6 +118,9 @@ export default function ReportLost() {
 
   const reportMutation = useMutation({
     mutationFn: async (data: FormState) => {
+      if (!imageBase64) {
+        throw new Error("Please upload a photo of the ID");
+      }
       if (!data.id_type) {
         throw new Error("ID type is required");
       }
@@ -169,8 +172,8 @@ export default function ReportLost() {
 
       navigate(createPageUrl("Home"));
     },
-    onError: () => {
-      toast.error("Failed to report lost ID. Please try again.");
+    onError: (error: Error) => {
+      toast.error(error.message || "Something went wrong. Please try again.");
     },
   });
 
@@ -205,7 +208,7 @@ export default function ReportLost() {
               {/* Photo Upload */}
               <div className="space-y-2">
                 <div>
-                  <Label>ID Photo (Optional)</Label>
+                  <Label>ID Photo *</Label>
                   {uploading && (
                     <p className="text-sm text-rust mt-1 flex items-center gap-2">
                       <Loader2 className="h-4 w-4 animate-spin" />
@@ -220,7 +223,7 @@ export default function ReportLost() {
                       <img
                         src={photoUrl}
                         alt="ID Preview"
-                        className="w-24 h-24 object-contain rounded-lg"
+                        className="w-full max-h-80 object-contain rounded-lg mx-auto"
                       />
                       <Button
                         type="button"
