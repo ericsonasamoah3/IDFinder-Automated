@@ -36,3 +36,8 @@ lambdas/**/*.zip
 # --- Python bytecode ---
 __pycache__/
 *.pyc
+
+# --- Working notes, kept local ---
+# This repo is public; the change log records deployment state, open security
+# trade-offs and decision history that shouldn't be published alongside it.
+memory/
