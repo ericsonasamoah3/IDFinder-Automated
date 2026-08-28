@@ -111,7 +111,10 @@ export default function ReportLost() {
         throw new Error("ID type is required");
       }
 
-      // Send image to S3 via Lambda if one was uploaded
+      // Send image to S3 via Lambda if one was uploaded. The returned key
+      // is threaded into the record below -- previously it was discarded,
+      // so every uploaded ID photo sat in S3 unlinked to any report.
+      let photoKey = "";
       if (imageBase64) {
         const saveResponse = await fetch(SAVE_URL, {
           method: "POST",
@@ -125,6 +128,9 @@ export default function ReportLost() {
         if (!saveResponse.ok) {
           throw new Error("Failed to save image");
         }
+
+        const saved = await saveResponse.json();
+        photoKey = saved.key ?? "";
       }
 
       const newReport = await createLostID({
@@ -136,6 +142,7 @@ export default function ReportLost() {
         id_number_hint: data.id_number_hint,
         location: data.last_seen_location,
         description: data.description,
+        photo_key: photoKey,
       });
 
       return { newReport };
@@ -300,8 +307,10 @@ export default function ReportLost() {
 
               {/* Last 4 */}
               <div className="space-y-2">
-                <Label>Last 4 Digits</Label>
+                <Label>Last 4 Digits *</Label>
                 <Input
+                  required
+                  inputMode="numeric"
                   maxLength={4}
                   value={formData.id_number_hint}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) =>

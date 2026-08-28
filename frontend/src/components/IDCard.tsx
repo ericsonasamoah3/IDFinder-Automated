@@ -87,7 +87,9 @@ export default function IDCard({ data, type = "lost", onClick }: Props) {
           </div>
           <div className="font-mono text-[11px] uppercase tracking-wider text-ink/50 mt-0.5">
             {idTypeLabels[idType]}
-            {data.id_number_hint ? ` \u00b7 \u2022\u2022\u2022${data.id_number_hint}` : ""}
+            {/* The last-4 hint used to render here. It is deliberately no
+                longer returned by the API -- it doubles as the match key,
+                and publishing it allowed forged matches. */}
           </div>
         </div>
       </div>

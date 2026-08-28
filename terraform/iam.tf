@@ -16,22 +16,6 @@
 # Existing provider ARN:
 #
 # arn:aws:iam::258506450105:oidc-provider/token.actions.githubusercontent.com
-#
-# Repository:
-#
-# ericsonasamoah3/IDFinder-Automated
-#
-# Branch:
-#
-# master
-#
-# IMPORTANT:
-# The actual GitHub OIDC token for this repository has been verified
-# and contains this exact subject:
-#
-# repo:ericsonasamoah3@84795350/IDFinder-Automated@1335494099:ref:refs/heads/master
-#
-# The trust policy below MUST match that exact subject.
 
 resource "aws_iam_openid_connect_provider" "github" {
   count = var.create_github_oidc_provider ? 1 : 0
@@ -81,22 +65,20 @@ data "aws_iam_policy_document" "github_oidc_assume" {
       ]
     }
 
-    # IMPORTANT:
-    # This is the EXACT subject returned by the GitHub OIDC token
-    # observed from this repository.
+    # GitHub's subject claim for a branch push is exactly:
     #
-    # Do NOT replace this with:
+    #   repo:OWNER/REPO:ref:refs/heads/BRANCH
     #
-    # repo:${var.github_repo}:ref:refs/heads/${var.github_branch}
-    #
-    # because the actual token issued to this repository includes
-    # the repository-owner ID and repository ID.
+    # repository_id and repository_owner_id are SEPARATE claims -- they are
+    # not interpolated into sub. An earlier version of this file hardcoded
+    # them into the subject with "@", which no GitHub token ever matches,
+    # so AssumeRoleWithWebIdentity always failed.
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
 
       values = [
-        "repo:ericsonasamoah3@84795350/IDFinder-Automated@1335494099:ref:refs/heads/master"
+        "repo:${var.github_repo}:ref:refs/heads/${var.github_branch}"
       ]
     }
   }

@@ -10,14 +10,16 @@ export type LostStatus = "searching" | "matched" | "recovered";
 export type FoundStatus = "unclaimed" | "matched" | "returned";
 
 // Matches the fields returned by GET /IDfinder in idfinder_backend.py.
-// Note: reporter_email and reporter_phone are NEVER returned by the API --
-// contact details are only ever delivered via SMS once a match is found.
+// Note: reporter_email, reporter_phone and id_number_hint are NEVER returned
+// by the API. The last-4 hint is withheld because it doubles as the match
+// key -- publishing it let anyone forge a match and be sent the other
+// party's contact details. Contact details only ever arrive via SMS once a
+// match is confirmed.
 export type IDRecord = {
   record_id: string;
   record_type: "lost" | "found";
   name_on_id: string;
   id_type: IDType;
-  id_number_hint?: string;
   location: string;
   description?: string;
   status: "pending" | "matched";
@@ -95,6 +97,8 @@ export type CreateRecordInput = {
   id_number_hint?: string;
   location: string;
   description?: string;
+  // S3 key returned by the /save Lambda, when a photo was attached.
+  photo_key?: string;
 };
 
 export async function createLostID(input: CreateRecordInput): Promise<{ record_id: string }> {

@@ -111,7 +111,7 @@ resource "aws_lambda_function" "process" {
   role             = aws_iam_role.process_lambda.arn
   handler          = "ocr_backend.lambda_handler"
   runtime          = "python3.13"
-  timeout          = 65 # must exceed the 60s timeout the code uses when calling the OCR container
+  timeout          = 29 # API Gateway HTTP API caps integrations at ~30s, so anything longer is unreachable; ocr_backend.py uses a matching 25s client timeout
   filename         = data.archive_file.ocr_process_zip.output_path
   source_code_hash = data.archive_file.ocr_process_zip.output_base64sha256
 
@@ -272,4 +272,46 @@ resource "aws_lambda_permission" "save_apigw" {
   function_name = aws_lambda_function.save.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_apigatewayv2_api.main.execution_arn}/*/*"
+}
+
+# ---------------------------------------------------------------------------
+# Lambda log groups
+#
+# Lambda auto-creates these on first invoke with retention set to "never
+# expire", which quietly accumulates cost forever. Declaring them here pins
+# retention to 14 days, matching the ECS log group in ecs.tf.
+#
+# The import blocks below adopt the groups Lambda already created -- without
+# them, apply fails with ResourceAlreadyExistsException. They are safe to
+# delete once the first apply has run and the groups are in state.
+# ---------------------------------------------------------------------------
+
+import {
+  to = aws_cloudwatch_log_group.backend
+  id = "/aws/lambda/${var.project_name}-backend"
+}
+
+import {
+  to = aws_cloudwatch_log_group.process
+  id = "/aws/lambda/${var.project_name}-process"
+}
+
+import {
+  to = aws_cloudwatch_log_group.save
+  id = "/aws/lambda/${var.project_name}-save"
+}
+
+resource "aws_cloudwatch_log_group" "backend" {
+  name              = "/aws/lambda/${aws_lambda_function.backend.function_name}"
+  retention_in_days = 14
+}
+
+resource "aws_cloudwatch_log_group" "process" {
+  name              = "/aws/lambda/${aws_lambda_function.process.function_name}"
+  retention_in_days = 14
+}
+
+resource "aws_cloudwatch_log_group" "save" {
+  name              = "/aws/lambda/${aws_lambda_function.save.function_name}"
+  retention_in_days = 14
 }

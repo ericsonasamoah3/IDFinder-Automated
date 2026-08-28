@@ -26,7 +26,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ADD THIS HERE
+      # TEMPORARY: prints the OIDC claims this repo actually issues, so the
+      # sub in terraform/iam.tf can be verified against reality. Delete this
+      # step once a run gets past "Configure AWS credentials" successfully.
       - name: Debug GitHub OIDC claims
         shell: bash
         run: |
@@ -62,7 +64,6 @@ jobs:
 
       - name: Terraform format check
         run: terraform fmt -check -recursive
-        continue-on-error: true
 
       - name: Terraform init
         run: terraform init

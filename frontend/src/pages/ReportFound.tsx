@@ -117,7 +117,10 @@ export default function ReportFound() {
         throw new Error("ID type is required");
       }
 
-      // Send image to S3 via Lambda if one was uploaded
+      // Send image to S3 via Lambda if one was uploaded. The returned key
+      // is threaded into the record below -- previously it was discarded,
+      // so every uploaded ID photo sat in S3 unlinked to any report.
+      let photoKey = "";
       if (imageBase64) {
         const saveResponse = await fetch(SAVE_URL, {
           method: "POST",
@@ -131,6 +134,9 @@ export default function ReportFound() {
         if (!saveResponse.ok) {
           throw new Error("Failed to save image");
         }
+
+        const saved = await saveResponse.json();
+        photoKey = saved.key ?? "";
       }
 
       const newReport = await createFoundID({
@@ -142,6 +148,7 @@ export default function ReportFound() {
         id_number_hint: data.id_number_hint,
         location: data.found_location,
         description: data.description,
+        photo_key: photoKey,
       });
 
       return { newReport };
@@ -279,6 +286,8 @@ export default function ReportFound() {
               <div className="space-y-2">
                 <Label>Last 4 Digits *</Label>
                 <Input
+                  required
+                  inputMode="numeric"
                   value={formData.id_number_hint}
                   maxLength={4}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) =>

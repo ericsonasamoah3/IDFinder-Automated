@@ -1,0 +1,99 @@
+# Changelog
+
+Running record of changes made to this project, and the reasoning behind them.
+
+Most valuable for what git doesn't record: terraform applies, deployment state,
+AWS console actions, and decisions made *not* to do something.
+
+---
+
+## 2026-08-28
+
+### Fixed: image upload always failed ("Failed to process")
+
+- **terraform/variables.tf** — `ocr_container_port` 8000 → 8080. Root cause of
+  the upload failure. The `ericsonasamoah/ocr123` container runs gunicorn on
+  `0.0.0.0:8080` (confirmed in the `/ecs/idfinder1-ocr` CloudWatch logs), but
+  the target group, security group and port mapping all pointed at 8000. Health
+  checks hit a closed port, the ALB returned 502, and ECS killed and replaced
+  the task on a loop. The container itself was never broken.
+
+### Fixed: the three issues from the 2026-08-28 review
+
+- **lambdas/backend/idfinder_backend.py** — dropped `id_number_hint` from
+  `PUBLIC_FIELDS`. It doubles as the match key, so publishing it let anyone
+  read a pending record's last-4, POST a forged opposite-type record with their
+  own phone, and be texted the other party's name and email — while also
+  burning the real record's `pending` status. Still stored, still used for
+  matching, no longer broadcast.
+- **terraform/iam.tf** — replaced the hardcoded OIDC subject
+  (`repo:owner@84795350/repo@1335494099:...`, a shape GitHub never issues) with
+  the documented `repo:${var.github_repo}:ref:refs/heads/${var.github_branch}`.
+  CI could not assume the deploy role at all until this was corrected.
+- **terraform/amplify.tf** — added `lifecycle { ignore_changes =
+  [environment_variables] }`. The `null_resource` CLI shim sets 8 env vars;
+  Terraform declared 4. Every apply after the first stripped the
+  `VITE_COGNITO_*` vars back off without re-running the shim, silently breaking
+  sign-in.
+
+### Correctness
+
+- **backend** — `handle_list` now paginates on `LastEvaluatedKey` (capped at
+  500 records). A single `scan()` stops at 1MB, so the listing was silently
+  truncating with no error. Also switched the filter from `Key` to `Attr`.
+- **backend** — SMS failures no longer fail the request. Both records are
+  already written and marked matched before SNS is called, so an exception
+  there returned a 500 for a report that had actually succeeded, prompting a
+  retry and a duplicate.
+- **backend** — match claim now uses a `ConditionExpression` on
+  `status = pending`, so two concurrent POSTs can't both claim the same record.
+- **backend** — `id_number_hint` is normalised to digits-only last-4 and is now
+  required; previously an unnormalised or empty hint silently made a record
+  unmatchable forever.
+- **frontend + backend** — the S3 key from `/save` is now threaded into the
+  record as `photo_key`. It was being discarded, so every uploaded ID photo sat
+  in S3 unlinked to any report until the 180-day lifecycle rule deleted it.
+- **frontend** — "Last 4 Digits *" on the found form had the asterisk but no
+  `required`; both forms now enforce it.
+- **terraform/lambda.tf** — `process` Lambda timeout 65s → 29s, and the OCR
+  client timeout 60s → 25s. API Gateway caps HTTP API integrations at ~30s, so
+  the longer values were unreachable.
+
+### Security
+
+- **ocr_backend.py / idfinder_save.py** — stopped returning `str(e)` to
+  callers; the detail is logged instead. Both endpoints are public and were
+  leaking the internal ALB hostname, bucket names and library internals.
+
+### Cleanup
+
+- **terraform/lambda.tf** — declared the three Lambda log groups at 14-day
+  retention (they existed with "never expire"). Uses `import` blocks to adopt
+  the groups Lambda already created; those blocks can be deleted after the
+  first successful apply.
+- **frontend** — removed GitHub Pages leftovers (`homepage`, `build:ghpages`,
+  `predeploy`, `deploy`, the `gh-pages` dep, and the `ghpages` base mode in
+  `vite.config.ts`); regenerated `package-lock.json` so Amplify's `npm ci`
+  stays consistent. Deleted unimported `App.css` and `react.svg`.
+- **.github/workflows/deploy.yml** — `terraform fmt -check` no longer has
+  `continue-on-error: true`. Annotated the OIDC debug step as temporary rather
+  than removing it, so the next run still prints the real subject claim for
+  verification.
+
+### Not done — decisions deferred
+
+- **ALB is still plain HTTP.** ID photos cross the public internet unencrypted
+  between the Lambda and the container. Fixing it needs an ACM certificate and
+  a domain, which is a larger change than the rest of this batch.
+- **`/save` and `/process` are still unauthenticated.** Anyone can push 8MB
+  blobs into the bucket or use the OCR container for free.
+- **`POST /IDfinder` is still unauthenticated.** Withholding the last-4 removes
+  the easy harvest, but a brute-force over ~10k values per ID type still works.
+  Closing it properly means either a Cognito authorizer (frontend must then
+  send a JWT) or mutual confirmation before contact details are released — a
+  design call, not a bug fix.
+- **Deploy role still has `iam:PassRole` on `*` plus `lambda:*`**, which is
+  effectively admin.
+- **No `terraform apply` has been run.** All of the above is code-only so far;
+  none of it is live. `TF_VAR_github_access_token` and `TF_VAR_ocr_api_key`
+  were not available in this environment.

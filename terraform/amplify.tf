@@ -45,6 +45,17 @@ resource "aws_amplify_app" "frontend" {
     target = "/index.html"
     status = "404-200" # SPA client-side routing (react-router)
   }
+
+  # null_resource.amplify_cognito_env below overwrites this app's env vars
+  # out-of-band via the AWS CLI, adding the VITE_COGNITO_* set that can't be
+  # declared here (circular dependency -- see the comment on that resource).
+  # Without this, every subsequent apply reverts the app to the 4 vars
+  # declared above, the null_resource does NOT re-run because its trigger
+  # hash is unchanged, and the deployed frontend silently loses its Cognito
+  # config -- sign-in breaks with no error at apply time.
+  lifecycle {
+    ignore_changes = [environment_variables]
+  }
 }
 
 resource "aws_amplify_branch" "master" {

@@ -54,7 +54,10 @@ def lambda_handler(event, context):
         return response(200, {"success": True, "key": key})
 
     except Exception as e:  # noqa: BLE001
-        return response(500, {"success": False, "error": str(e)})
+        # Log the detail, return a generic message -- str(e) leaked bucket
+        # names and boto internals to a public, unauthenticated endpoint.
+        print(f"Image save failed: {e}")
+        return response(500, {"success": False, "error": "Could not save the image."})
 
 
 def response(status_code, body):

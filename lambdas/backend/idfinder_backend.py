@@ -13,10 +13,10 @@ Handles:
                        Public -- no login required, so anyone can quickly
                        check "has my ID turned up" without creating an
                        account. Returned fields deliberately EXCLUDE
-                       reporter_email and reporter_phone -- those are never
-                       returned by this API under any circumstances. Contact
-                       details are only ever delivered out-of-band via SMS
-                       once a match is confirmed.
+                       reporter_email, reporter_phone AND id_number_hint --
+                       see PUBLIC_FIELDS. Contact details are only ever
+                       delivered out-of-band via SMS once a match is
+                       confirmed.
 
 Environment variables required:
   TABLE_NAME       - DynamoDB table name (see idfinder_table.tf)
@@ -31,7 +31,8 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 import boto3
-from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.conditions import Attr, Key
+from botocore.exceptions import ClientError
 
 TABLE_NAME = os.environ["TABLE_NAME"]
 MATCH_INDEX_NAME = os.environ.get("MATCH_INDEX_NAME", "match-index")
@@ -40,6 +41,10 @@ MATCH_INDEX_NAME = os.environ.get("MATCH_INDEX_NAME", "match-index")
 # marked "matched" -- only the actual SMS send is skipped. Flip to "true"
 # (see terraform/lambda.tf) once you're ready to send real texts.
 SMS_ENABLED = os.environ.get("SMS_ENABLED", "false").lower() == "true"
+
+# Hard cap on records returned by a single GET, so a large table can't blow
+# the Lambda's memory or API Gateway's response size limit.
+MAX_LIST_ITEMS = 500
 
 dynamodb = boto3.resource("dynamodb")
 table = dynamodb.Table(TABLE_NAME)
@@ -55,8 +60,20 @@ ALLOWED_ID_TYPES = {
 }
 ALLOWED_RECORD_TYPES = {"lost", "found"}
 
-# Fields returned by GET /IDfinder. reporter_email and reporter_phone are
-# intentionally never included here -- see module docstring.
+# Fields returned by GET /IDfinder.
+#
+# Deliberately excluded:
+#   reporter_email / reporter_phone -- contact details, never returned.
+#   id_number_hint -- this plus id_type IS the match key (see build_record).
+#                     Publishing it let anyone read a pending record's last-4,
+#                     POST a forged opposite-type record with their own phone
+#                     number, and be texted the other party's name and email --
+#                     while also burning the real record's "pending" status so
+#                     the genuine finder could never match it. The hint is
+#                     still stored and still used for matching; it is just no
+#                     longer broadcast.
+#   photo_key      -- internal S3 object key, not useful to a browser and not
+#                     something to hand out.
 #
 # name_on_id: the name printed on the ID itself (from OCR or manual entry).
 # reporter_name/email/phone: whoever is SUBMITTING the report -- the ID's
@@ -69,7 +86,6 @@ PUBLIC_FIELDS = (
     "record_type",
     "name_on_id",
     "id_type",
-    "id_number_hint",
     "location",
     "description",
     "status",
@@ -123,15 +139,27 @@ def handle_list(event):
     if record_type and record_type not in ALLOWED_RECORD_TYPES:
         raise ValidationError("record_type must be 'lost' or 'found'")
 
+    scan_kwargs = {}
     if record_type:
-        result = table.scan(
-            FilterExpression=Key("record_type").eq(record_type)
-        )
-    else:
-        result = table.scan()
+        # Attr, not Key: FilterExpression operates on non-key attributes.
+        # Key() renders the same expression here by coincidence, but it is
+        # the wrong builder and breaks as soon as the filter gets richer.
+        scan_kwargs["FilterExpression"] = Attr("record_type").eq(record_type)
 
-    items = [redact(item) for item in result.get("Items", [])]
-    return response(200, {"success": True, "items": items})
+    # A single scan() returns at most 1MB and then stops, leaving the rest
+    # behind LastEvaluatedKey. Without this loop the listing silently
+    # truncated once the table outgrew 1MB -- no error, just missing records.
+    items = []
+    while True:
+        result = table.scan(**scan_kwargs)
+        items.extend(redact(item) for item in result.get("Items", []))
+
+        last_key = result.get("LastEvaluatedKey")
+        if not last_key or len(items) >= MAX_LIST_ITEMS:
+            break
+        scan_kwargs["ExclusiveStartKey"] = last_key
+
+    return response(200, {"success": True, "items": items[:MAX_LIST_ITEMS]})
 
 
 def redact(item):
@@ -152,8 +180,7 @@ def handle_create(event):
     table.put_item(Item=record)
 
     match = find_match(record)
-    if match:
-        mark_matched_and_notify(record, match)
+    if match and mark_matched_and_notify(record, match):
         record["status"] = "matched"
 
     return response(201, {"success": True, "record_id": record["record_id"]})
@@ -169,6 +196,7 @@ def build_record(body):
     id_number_hint = (body.get("id_number_hint") or "").strip()
     location = (body.get("location") or "").strip()
     description = (body.get("description") or "").strip()
+    photo_key = (body.get("photo_key") or "").strip()
 
     if record_type not in ALLOWED_RECORD_TYPES:
         raise ValidationError("record_type must be 'lost' or 'found'")
@@ -187,6 +215,16 @@ def build_record(body):
     if not location:
         raise ValidationError("location is required")
 
+    # Matching compares match_key by exact string equality, so an
+    # unnormalised hint ("1234 " vs "1234") silently fails to match. Reduce
+    # to digits and take the last 4, which is what both report forms ask for.
+    id_number_hint = re.sub(r"\D", "", id_number_hint)[-4:]
+    if not id_number_hint:
+        raise ValidationError(
+            "id_number_hint is required -- matching relies on it, and a "
+            "record without it can never be matched"
+        )
+
     now = datetime.now(timezone.utc).isoformat()
 
     return {
@@ -201,6 +239,7 @@ def build_record(body):
         "match_key": f"{id_type}#{id_number_hint}",
         "location": location,
         "description": description,
+        "photo_key": photo_key,
         "status": "pending",
         "matched_with": None,
         "created_at": now,
@@ -242,6 +281,36 @@ def find_match(record):
 
 
 def mark_matched_and_notify(record, match):
+    """Claim `match` for `record` and notify both parties.
+
+    Returns True if this call won the match, False if a concurrent request
+    claimed the same pending record first.
+    """
+    # Claim the candidate conditionally. Two simultaneous POSTs can both see
+    # the same pending record in find_match(); whichever arrives here second
+    # fails the condition and backs off rather than silently overwriting the
+    # first match.
+    try:
+        table.update_item(
+            Key={"record_id": match["record_id"]},
+            UpdateExpression="SET #s = :matched, matched_with = :other",
+            ConditionExpression="#s = :pending",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={
+                ":matched": "matched",
+                ":other": record["record_id"],
+                ":pending": "pending",
+            },
+        )
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            print(
+                f"Match {match['record_id']} was already claimed by another "
+                f"request; leaving {record['record_id']} pending."
+            )
+            return False
+        raise
+
     table.update_item(
         Key={"record_id": record["record_id"]},
         UpdateExpression="SET #s = :matched, matched_with = :other",
@@ -251,18 +320,21 @@ def mark_matched_and_notify(record, match):
             ":other": match["record_id"],
         },
     )
-    table.update_item(
-        Key={"record_id": match["record_id"]},
-        UpdateExpression="SET #s = :matched, matched_with = :other",
-        ExpressionAttributeNames={"#s": "status"},
-        ExpressionAttributeValues={
-            ":matched": "matched",
-            ":other": record["record_id"],
-        },
-    )
 
-    send_match_sms(to_phone=record["reporter_phone"], other=match)
-    send_match_sms(to_phone=match["reporter_phone"], other=record)
+    # A notification failure must not fail the request. Both records are
+    # already written and marked matched by this point, so raising here would
+    # return a 500 to a caller whose report actually succeeded -- they would
+    # retry and create a duplicate. Log and carry on instead.
+    try:
+        send_match_sms(to_phone=record["reporter_phone"], other=match)
+        send_match_sms(to_phone=match["reporter_phone"], other=record)
+    except Exception as e:  # noqa: BLE001
+        print(
+            f"Match {record['record_id']}<->{match['record_id']} recorded, "
+            f"but SMS notification failed: {e}"
+        )
+
+    return True
 
 
 def send_match_sms(to_phone, other):

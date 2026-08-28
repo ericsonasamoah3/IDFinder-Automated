@@ -30,7 +30,10 @@ def lambda_handler(event, context):
             headers={"Content-Type": "application/octet-stream"},
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=60) as res:
+        # Must stay under the Lambda's own timeout (29s, itself capped by
+        # API Gateway's ~30s integration limit). A longer timeout here is
+        # unreachable -- the request is killed upstream before it fires.
+        with urllib.request.urlopen(req, timeout=25) as res:
             container_output = json.loads(res.read().decode("utf-8"))
 
         # -----------------------------
@@ -64,10 +67,14 @@ def lambda_handler(event, context):
             "id_type": id_type,
             "id_number_hint": id_number_hint,
         })
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
+        # Log the detail, return a generic message. str(e) here leaked the
+        # container's internal ALB hostname and urllib internals to any
+        # caller, and this endpoint is public.
+        print(f"OCR process failed: {e}")
         return response(500, {
             "success": False,
-            "error": str(e),
+            "error": "Could not process the image. Please try again.",
         })
 
 

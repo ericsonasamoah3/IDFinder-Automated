@@ -59,9 +59,9 @@ variable "ocr_api_key" {
 }
 
 variable "ocr_container_port" {
-  description = "Port the OCR container listens on"
+  description = "Port the OCR container listens on. The ericsonasamoah/ocr123 image runs gunicorn bound to 0.0.0.0:8080 -- this must match, or the ALB health check hits a closed port, returns 502, and ECS replaces the task on a loop."
   type        = number
-  default     = 8000
+  default     = 8080
 }
 
 variable "local_dev_url" {
