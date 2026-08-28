@@ -160,10 +160,19 @@ resource "aws_iam_role_policy" "save_permissions" {
       {
         Effect = "Allow"
         # GetObject is for head_object, which the save Lambda uses to check
-        # whether a name is already taken before writing -- without it the
-        # check raises 403 instead of 404 and every upload gets a suffix.
+        # whether a name is already taken before writing.
         Action   = ["s3:PutObject", "s3:GetObject"]
         Resource = "${aws_s3_bucket.uploads.arn}/*"
+      },
+      {
+        Effect = "Allow"
+        # ListBucket on the BUCKET (not /*) is what makes head_object return
+        # 404 for a missing key. Without it S3 answers 403 instead, refusing
+        # to confirm whether the object exists -- so the "is this name free?"
+        # check raises rather than reporting the name as free, and every
+        # upload fails.
+        Action   = ["s3:ListBucket"]
+        Resource = aws_s3_bucket.uploads.arn
       },
       {
         Effect   = "Allow"
@@ -365,6 +374,14 @@ resource "aws_iam_role_policy" "save_worker_permissions" {
         # the JSON sidecar, DeleteObject to clear the staged upload.
         Action   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
         Resource = "${aws_s3_bucket.uploads.arn}/*"
+      },
+      {
+        Effect = "Allow"
+        # As above: without ListBucket, a missing staging object surfaces as
+        # 403 rather than 404, so the worker's "already done?" branch never
+        # fires and the job retries its way to the dead-letter queue.
+        Action   = ["s3:ListBucket"]
+        Resource = aws_s3_bucket.uploads.arn
       },
       {
         Effect = "Allow"
