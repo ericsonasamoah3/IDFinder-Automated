@@ -17,6 +17,12 @@
 resource "aws_sqs_queue" "save_dlq" {
   name = "${var.project_name}-save-dlq"
 
+  # The GitHub deploy role only gained sqs:* in the same commit that added
+  # these queues. Terraform sees no dependency between an IAM policy and a
+  # queue, so without this it is free to attempt CreateQueue first and get
+  # AccessDenied -- which is exactly what happened on the first attempt.
+  depends_on = [aws_iam_role_policy.github_deploy]
+
   # Longer than the main queue: a job only arrives here after it has already
   # failed repeatedly, and it needs to survive long enough to be noticed.
   message_retention_seconds = 1209600 # 14 days, the SQS maximum

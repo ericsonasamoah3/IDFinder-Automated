@@ -164,6 +164,15 @@ resource "aws_iam_role_policy" "github_deploy" {
           "sns:*",
 
           # ---------------------------------------------------------
+          # SQS
+          # ---------------------------------------------------------
+          # Image-save job queue + its dead-letter queue (terraform/sqs.tf).
+          # Adding SQS to the stack without adding it here is what broke the
+          # apply that introduced those queues: CI could create the worker
+          # Lambda but was denied CreateQueue.
+          "sqs:*",
+
+          # ---------------------------------------------------------
           # SSM Parameter Store
           # ---------------------------------------------------------
           "ssm:*",
