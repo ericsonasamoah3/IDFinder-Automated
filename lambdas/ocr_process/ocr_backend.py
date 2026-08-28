@@ -49,7 +49,36 @@ def lambda_handler(event, context):
         # keeps working if a future image version does wrap its output.
         extracted = container_output.get("extracted_details") or container_output
 
-        name_on_id = extracted.get("full_name") or ""
+        # Field names only, never values -- the container's own logs already
+        # showed it will print secrets, and this payload is somebody's ID.
+        # This is here so a blank auto-fill can be diagnosed from CloudWatch
+        # without asking anyone to hand over a photo of their licence.
+        print(
+            "OCR container keys="
+            f"{sorted(extracted.keys()) if isinstance(extracted, dict) else type(extracted)} "
+            f"is_government_id={container_output.get('is_government_id')} "
+            f"doc_type={container_output.get('document_type')!r} "
+            f"name_present={bool(extracted.get('full_name'))}"
+        )
+
+        # Accept the variants different document types come back with: a
+        # passport MRZ yields surname/given_names separately rather than a
+        # single full_name.
+        name_on_id = (
+            extracted.get("full_name")
+            or extracted.get("name")
+            or " ".join(
+                part
+                for part in (
+                    extracted.get("given_names"),
+                    extracted.get("first_name"),
+                    extracted.get("surname"),
+                    extracted.get("last_name"),
+                )
+                if part
+            )
+            or ""
+        ).strip()
         # US spelling is what the container actually emits; accept both, since
         # the field name is the container's to change and this is cheap.
         licence_number = (
@@ -81,6 +110,11 @@ def lambda_handler(event, context):
             "name_on_id": name_on_id,
             "id_type": id_type,
             "id_number_hint": id_number_hint,
+            # Passed straight back so the browser can hand it to /save, which
+            # archives it as JSON next to the photo. Also lets the form warn
+            # when the model says this isn't a government ID at all.
+            "is_government_id": container_output.get("is_government_id"),
+            "extracted": extracted if isinstance(extracted, dict) else {},
         })
     except Exception as e:  # noqa: BLE001
         # Log the detail, return a generic message. str(e) here leaked the

@@ -152,8 +152,11 @@ resource "aws_iam_role_policy" "save_permissions" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect   = "Allow"
-        Action   = ["s3:PutObject"]
+        Effect = "Allow"
+        # GetObject is for head_object, which the save Lambda uses to check
+        # whether a name is already taken before writing -- without it the
+        # check raises 403 instead of 404 and every upload gets a suffix.
+        Action   = ["s3:PutObject", "s3:GetObject"]
         Resource = "${aws_s3_bucket.uploads.arn}/*"
       },
     ]

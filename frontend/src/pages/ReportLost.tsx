@@ -48,6 +48,9 @@ export default function ReportLost() {
   const [uploading, setUploading] = useState(false);
   const [photoUrl, setPhotoUrl] = useState<string>("");
   const [imageBase64, setImageBase64] = useState<string>("");
+  // Kept so the raw OCR output can be archived to S3 next to the
+  // photo when the report is submitted.
+  const [ocrJson, setOcrJson] = useState<unknown>(null);
 
   const [formData, setFormData] = useState<FormState>({
     owner_name: "",
@@ -92,7 +95,15 @@ export default function ReportLost() {
           id_number_hint: result.id_number_hint ?? "",
         }));
 
-        toast.success("ID details auto-filled!");
+        setOcrJson(result.extracted ?? result);
+
+        if (result.is_government_id === false) {
+          toast.warning(
+            "That doesn't look like a government ID -- please check the photo."
+          );
+        } else {
+          toast.success("ID details auto-filled!");
+        }
       } else {
         toast.error(result.error || "Failed to extract ID details");
       }
@@ -122,6 +133,11 @@ export default function ReportLost() {
           body: JSON.stringify({
             image_base64: imageBase64,
             form_type: "lost",
+            // Drives the S3 filename: lost/<NAME>.jpg and
+            // lost/json/<NAME>.json. Taken from the form rather than the OCR
+            // result so a correction the user typed is what gets used.
+            name_on_id: data.owner_name,
+            ocr_json: ocrJson,
           }),
         });
 
@@ -214,6 +230,7 @@ export default function ReportLost() {
                         onClick={() => {
                           setPhotoUrl("");
                           setImageBase64("");
+                          setOcrJson(null);
                         }}
                       >
                         <X className="h-4 w-4" />
