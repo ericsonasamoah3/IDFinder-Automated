@@ -65,20 +65,27 @@ data "aws_iam_policy_document" "github_oidc_assume" {
       ]
     }
 
-    # GitHub's subject claim for a branch push is exactly:
+    # DO NOT "simplify" this to the stock GitHub format:
     #
-    #   repo:OWNER/REPO:ref:refs/heads/BRANCH
+    #   repo:${var.github_repo}:ref:refs/heads/${var.github_branch}
     #
-    # repository_id and repository_owner_id are SEPARATE claims -- they are
-    # not interpolated into sub. An earlier version of this file hardcoded
-    # them into the subject with "@", which no GitHub token ever matches,
-    # so AssumeRoleWithWebIdentity always failed.
+    # That is the DEFAULT subject shape, but this repository has a CUSTOMISED
+    # OIDC subject claim template configured on the GitHub side, which splices
+    # the repository-owner ID and repository ID into the subject with "@".
+    #
+    # This was tested the hard way on 2026-08-28: swapping the value below for
+    # the stock format broke "Configure AWS credentials (OIDC)" immediately --
+    # the run that applied the change authenticated with the old value, and
+    # every run after it failed. Reverted.
+    #
+    # If you ever change the repo's OIDC subject template, read the real claim
+    # off the "Debug GitHub OIDC claims" step and paste it here verbatim.
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
 
       values = [
-        "repo:${var.github_repo}:ref:refs/heads/${var.github_branch}"
+        "repo:ericsonasamoah3@84795350/IDFinder-Automated@1335494099:ref:refs/heads/master"
       ]
     }
   }

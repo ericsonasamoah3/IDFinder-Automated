@@ -94,9 +94,10 @@ AWS console actions, and decisions made *not* to do something.
   design call, not a bug fix.
 - **Deploy role still has `iam:PassRole` on `*` plus `lambda:*`**, which is
   effectively admin.
-- **No `terraform apply` has been run.** All of the above is code-only so far;
-  none of it is live. `TF_VAR_github_access_token` and `TF_VAR_ocr_api_key`
-  were not available in this environment.
+- **Applied via CI, not locally.** `TF_VAR_github_access_token` and
+  `TF_VAR_ocr_api_key` were not available in this environment, so the apply was
+  left to the GitHub Actions workflow. See the recovery note below for what
+  landed and what did not.
 
 ### Partial apply recovery (same day, after the first push)
 
@@ -117,3 +118,22 @@ AWS console actions, and decisions made *not* to do something.
   `repo:ericsonasamoah3/IDFinder-Automated:ref:refs/heads/master`. The state
   lock error seen locally was a transient collision with that CI run, not a
   stale lock — the `.tflock` object was already gone.
+
+### Reverted: the OIDC subject "fix" was wrong
+
+- **terraform/iam.tf** — restored the original hardcoded subject
+  `repo:ericsonasamoah3@84795350/IDFinder-Automated@1335494099:ref:refs/heads/master`.
+  Changing it to the stock `repo:OWNER/REPO:ref:refs/heads/BRANCH` broke CI
+  authentication outright.
+- **Why the earlier reasoning was wrong**: the stock format is the *default*
+  subject shape, but this repository has a customised OIDC subject claim
+  template configured on the GitHub side, which splices the repository-owner ID
+  and repository ID in with "@". The warning comment already in the file was
+  correct and should not have been overridden.
+- **How it presented**: run 1 (8e018fd) authenticated using the old, still-live
+  policy and then applied the change — so it looked like proof the new value
+  worked. Run 2 (78ecd5d) failed at "Configure AWS credentials (OIDC)" with the
+  new value live. Both Aug 16 runs had also succeeded with the "@" value.
+- **Recovery requires a manual step**: CI cannot repair its own trust policy, so
+  the live role must be corrected with `aws iam update-assume-role-policy`
+  before any further CI run can authenticate.
