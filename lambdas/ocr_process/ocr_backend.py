@@ -39,13 +39,28 @@ def lambda_handler(event, context):
         # -----------------------------
         # 3) Normalise response
         # -----------------------------
-        extracted = container_output.get("extracted_details", {})
-        name_on_id = extracted.get("full_name", "")
-        licence_number = extracted.get("licence_number", "")
+        # The container returns its fields FLAT, not wrapped:
+        #   {"is_government_id": true, "document_type": "Driving Licence",
+        #    "full_name": ..., "license_number": ..., "date_of_birth": ...}
+        # This used to read container_output["extracted_details"], which does
+        # not exist -- so it silently got {} and every field came back empty.
+        # document_type was read from the top level, which is why the ID type
+        # mapped correctly while the name and number stayed blank. The `or`
+        # keeps working if a future image version does wrap its output.
+        extracted = container_output.get("extracted_details") or container_output
+
+        name_on_id = extracted.get("full_name") or ""
+        # US spelling is what the container actually emits; accept both, since
+        # the field name is the container's to change and this is cheap.
+        licence_number = (
+            extracted.get("license_number")
+            or extracted.get("licence_number")
+            or ""
+        )
         id_number_hint = licence_number[-4:] if len(licence_number) >= 4 else licence_number
 
-        raw_doc_type = container_output.get("document_type", "").lower()
-        if "licence" in raw_doc_type:
+        raw_doc_type = (container_output.get("document_type") or "").lower()
+        if "licence" in raw_doc_type or "license" in raw_doc_type:
             id_type = "drivers_license"
         elif "passport" in raw_doc_type:
             id_type = "passport"
