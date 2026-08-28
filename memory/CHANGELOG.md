@@ -97,3 +97,23 @@ AWS console actions, and decisions made *not* to do something.
 - **No `terraform apply` has been run.** All of the above is code-only so far;
   none of it is live. `TF_VAR_github_access_token` and `TF_VAR_ocr_api_key`
   were not available in this environment.
+
+### Partial apply recovery (same day, after the first push)
+
+- **terraform/alb.tf** — target group switched from `name` to
+  `name_prefix = "idfocr"` with `create_before_destroy = true`. The first CI
+  apply got most of the way through (log groups imported at 14-day retention,
+  both Lambdas redeployed, OCR security group moved to 8080) and then failed on
+  the target group: `port` is ForceNew, so changing `ocr_container_port`
+  replaces the resource, but with a fixed name the replacement deadlocks — the
+  old group can't be destroyed while the listener and ECS service reference it,
+  and creating first collides on the duplicate name.
+- **State at that point was split**: SG on 8080, target group and task
+  definition still on 8000, so the ALB health check changed symptom from
+  `FailedHealthChecks` to `Target.Timeout` (SG now blocks 8000). Equally broken,
+  not worse.
+- **Confirmed working**: the OIDC fix. CI authenticated and ran the apply, and
+  the live trust policy now reads
+  `repo:ericsonasamoah3/IDFinder-Automated:ref:refs/heads/master`. The state
+  lock error seen locally was a transient collision with that CI run, not a
+  stale lock — the `.tflock` object was already gone.

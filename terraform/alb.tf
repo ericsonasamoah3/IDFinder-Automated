@@ -40,7 +40,14 @@ resource "aws_lb" "ocr" {
 }
 
 resource "aws_lb_target_group" "ocr" {
-  name        = "${var.project_name}-ocr-tg"
+  # name_prefix, not name: `port` is ForceNew on a target group, so changing
+  # ocr_container_port replaces this resource. With a fixed name the replace
+  # deadlocks -- the old group can't be destroyed while the listener and the
+  # ECS service still reference it, and a create-first would collide on the
+  # duplicate name. name_prefix + create_before_destroy lets Terraform stand
+  # the new group up, repoint the listener and service, then tear the old one
+  # down. (name_prefix is capped at 6 characters for target groups.)
+  name_prefix = "idfocr"
   port        = var.ocr_container_port
   protocol    = "HTTP"
   vpc_id      = aws_vpc.main.id
@@ -53,6 +60,10 @@ resource "aws_lb_target_group" "ocr" {
     timeout             = 10
     healthy_threshold   = 2
     unhealthy_threshold = 5
+  }
+
+  lifecycle {
+    create_before_destroy = true
   }
 }
 
