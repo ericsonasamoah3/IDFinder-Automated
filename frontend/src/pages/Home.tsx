@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import { Plus, Search, AlertCircle, LogIn, LogOut, Stamp } from "lucide-react";
+import { Plus, Search, AlertCircle, LogIn, LogOut, Stamp, Map } from "lucide-react";
 import { Link } from "react-router-dom";
 import { createPageUrl } from "../utils";
 import IDCard from "../components/IDCard";
@@ -84,6 +84,16 @@ export default function Home() {
               <Button className="bg-forest hover:bg-forest-dark border-forest-dark">
                 <Plus className="h-4 w-4 mr-2" />
                 Report a found ID
+              </Button>
+            </Link>
+            {/* Browsing the map needs no account, same as the listing below. */}
+            <Link to={createPageUrl("Map")}>
+              <Button
+                variant="ghost"
+                className="border border-cream/25 !text-cream/90 hover:!bg-cream/10"
+              >
+                <Map className="h-4 w-4 mr-2" />
+                Browse the map
               </Button>
             </Link>
           </div>

@@ -3,6 +3,15 @@ resource "aws_dynamodb_table" "records" {
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "record_id"
 
+  # Feeds idfinder_geojson_builder, which rebuilds the public pin files
+  # whenever a record changes. NEW_AND_OLD_IMAGES rather than KEYS_ONLY so a
+  # future incremental builder can tell what actually changed without going
+  # back to the table for every event.
+  #
+  # Streams are always-free up to 2.5M reads a month, well beyond this.
+  stream_enabled   = true
+  stream_view_type = "NEW_AND_OLD_IMAGES"
+
   attribute {
     name = "record_id"
     type = "S"

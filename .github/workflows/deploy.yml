@@ -53,12 +53,16 @@ jobs:
         env:
           TF_VAR_github_access_token: ${{ secrets.GH_ACCESS_TOKEN }}
           TF_VAR_ocr_api_key: ${{ secrets.OCR_API_KEY }}
+          # Optional. Unset just means the billing alarm is created with
+          # nobody subscribed to it -- the plan still succeeds.
+          TF_VAR_billing_alert_email: ${{ secrets.BILLING_ALERT_EMAIL }}
         run: terraform plan -out=tfplan
 
       - name: Terraform apply
         env:
           TF_VAR_github_access_token: ${{ secrets.GH_ACCESS_TOKEN }}
           TF_VAR_ocr_api_key: ${{ secrets.OCR_API_KEY }}
+          TF_VAR_billing_alert_email: ${{ secrets.BILLING_ALERT_EMAIL }}
         run: terraform apply -auto-approve tfplan
 
       - name: Show Terraform outputs

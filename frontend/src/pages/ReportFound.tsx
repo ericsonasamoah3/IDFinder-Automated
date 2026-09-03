@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, Suspense, lazy } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,7 +17,10 @@ import { Link, useNavigate } from "react-router-dom";
 import { createPageUrl } from "../utils";
 import { toast } from "sonner";
 import { createFoundID } from "../lib/storage";
-import type { IDType } from "../lib/storage";
+import type { IDType, LocationInput } from "../lib/storage";
+// Pulls in maplibre-gl for the drop-a-pin tab. Lazy so the map engine
+// downloads when this form opens rather than on first page load.
+const LocationPicker = lazy(() => import("../components/LocationPicker"));
 
 const PROCESS_URL = import.meta.env.VITE_ID_PROCESS;
 const SAVE_URL = import.meta.env.VITE_ID_SAVE;
@@ -52,6 +55,10 @@ export default function ReportFound() {
   // Kept so the raw OCR output can be archived to S3 next to the
   // photo when the report is submitted.
   const [ocrJson, setOcrJson] = useState<unknown>(null);
+
+  // Optional throughout. A report with no location still files, still
+  // matches, and still texts both parties -- it just never gets a map pin.
+  const [locationInput, setLocationInput] = useState<LocationInput | null>(null);
 
   const [formData, setFormData] = useState<FormState>({
     name_on_id: "",
@@ -168,6 +175,7 @@ export default function ReportFound() {
         location: data.found_location,
         description: data.description,
         photo_key: photoKey,
+        location_input: locationInput ?? undefined,
       });
 
       return { newReport };
@@ -320,9 +328,10 @@ export default function ReportFound() {
 
               {/* Remaining Fields */}
               <div className="space-y-2">
-                <Label>Where You Found It *</Label>
+                <Label>Area Where You Found It *</Label>
                 <Input
                   required
+                  placeholder="e.g. near Leeds train station"
                   value={formData.found_location}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                     setFormData({
@@ -331,6 +340,32 @@ export default function ReportFound() {
                     })
                   }
                 />
+                {/* Public field -- returned by GET /IDfinder to anyone. An
+                    exact address here would undo the 250m rounding on the map
+                    pin, so the API rejects house numbers and full postcodes.
+                    It matters more on a found report: a precise "where it is
+                    sitting" is exactly what a fraudulent claimant wants. */}
+                <p className="text-xs text-ink/50">
+                  An area or landmark, not a street address. This is shown
+                  publicly, so please leave off the house number and full
+                  postcode.
+                </p>
+              </div>
+
+              {/* Map location */}
+              <div className="space-y-2">
+                <Label>Pin It On The Map</Label>
+                <Suspense
+                    fallback={
+                      <div className="h-24 animate-pulse rounded-md bg-ink/5" />
+                    }
+                  >
+                    <LocationPicker
+                      value={locationInput}
+                      onChange={setLocationInput}
+                      accent="forest"
+                    />
+                  </Suspense>
               </div>
 
               <div className="space-y-2">

@@ -78,6 +78,14 @@ resource "aws_iam_role_policy" "backend_permissions" {
         Action   = ["sns:Publish"]
         Resource = "*" # SNS direct-to-phone-number publish has no fixed ARN to scope to
       },
+      {
+        Effect = "Allow"
+        # Send only. The backend hands a typed address to the geocode worker
+        # rather than resolving it inline -- POST /IDfinder is the request
+        # path and must not wait on a third-party API.
+        Action   = ["sqs:SendMessage"]
+        Resource = aws_sqs_queue.geocode_jobs.arn
+      },
     ]
   })
 }
@@ -93,9 +101,10 @@ resource "aws_lambda_function" "backend" {
 
   environment {
     variables = {
-      TABLE_NAME       = aws_dynamodb_table.records.name
-      MATCH_INDEX_NAME = "match-index"
-      SMS_ENABLED      = var.sms_enabled ? "true" : "false"
+      TABLE_NAME        = aws_dynamodb_table.records.name
+      MATCH_INDEX_NAME  = "match-index"
+      SMS_ENABLED       = var.sms_enabled ? "true" : "false"
+      GEOCODE_QUEUE_URL = aws_sqs_queue.geocode_jobs.id
     }
   }
 }
@@ -308,25 +317,20 @@ resource "aws_lambda_permission" "save_apigw" {
 # expire", which quietly accumulates cost forever. Declaring them here pins
 # retention to 14 days, matching the ECS log group in ecs.tf.
 #
-# The import blocks below adopt the groups Lambda already created -- without
-# them, apply fails with ResourceAlreadyExistsException. They are safe to
-# delete once the first apply has run and the groups are in state.
+# There used to be three `import` blocks here, adopting the groups Lambda had
+# already auto-created in a long-running account. They are gone, deliberately.
+#
+# An import block is not conditional: Terraform tries it on every plan, and
+# fails with "Cannot import non-existent remote object" when the group is not
+# there. That is exactly what happens on a clean deploy -- empty state, empty
+# account, nothing to adopt -- so the blocks turned a first apply into a hard
+# error. Terraform simply creates these groups now.
+#
+# If you ever again point this config at an account where the Lambdas have run
+# but the groups are unmanaged, adopt them once with `terraform import` from
+# the CLI rather than re-adding import blocks. A one-off command stays a
+# one-off; a block in the config breaks every future clean deploy.
 # ---------------------------------------------------------------------------
-
-import {
-  to = aws_cloudwatch_log_group.backend
-  id = "/aws/lambda/${var.project_name}-backend"
-}
-
-import {
-  to = aws_cloudwatch_log_group.process
-  id = "/aws/lambda/${var.project_name}-process"
-}
-
-import {
-  to = aws_cloudwatch_log_group.save
-  id = "/aws/lambda/${var.project_name}-save"
-}
 
 resource "aws_cloudwatch_log_group" "backend" {
   name              = "/aws/lambda/${aws_lambda_function.backend.function_name}"

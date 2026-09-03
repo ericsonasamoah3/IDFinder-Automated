@@ -87,3 +87,42 @@ variable "save_job_max_receives" {
   type        = number
   default     = 3
 }
+
+variable "geocode_job_max_receives" {
+  description = "How many times a geocode job is retried before it lands in the DLQ"
+  type        = number
+  default     = 3
+}
+
+variable "geocode_bias_countries" {
+  description = <<-EOT
+    Comma-separated ISO 3166-1 alpha-3 codes the geocoder biases results
+    toward. Without a bias, a query like "High Street" can resolve to any of
+    several hundred countries.
+  EOT
+  type        = string
+  default     = "GBR"
+}
+
+variable "billing_alert_email" {
+  description = <<-EOT
+    Address that receives billing alarm notifications. AWS sends a
+    confirmation link that must be clicked before anything is delivered --
+    the alarm is not protecting you until you do.
+
+    Defaults to empty so a non-interactive `terraform apply` (GitHub Actions)
+    is never blocked by a missing value: a variable with no default and no
+    TF_VAR fails the plan outright. Empty still creates the alarm and the
+    topic, it just subscribes nobody -- so set it, locally in a .tfvars or in
+    CI as the BILLING_ALERT_EMAIL secret. An alarm nobody is subscribed to is
+    only half an alarm.
+  EOT
+  type        = string
+  default     = ""
+}
+
+variable "billing_alert_threshold_usd" {
+  description = "Estimated monthly charges, in USD, above which the billing alarm fires"
+  type        = number
+  default     = 5
+}

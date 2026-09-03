@@ -55,3 +55,26 @@ output "save_dlq_url" {
   description = "Failed image-save jobs land here. Inspect with: aws sqs receive-message --queue-url <this>"
   value       = aws_sqs_queue.save_dlq.id
 }
+
+output "map_cdn_url" {
+  description = "Set as VITE_MAP_CDN. The map page reads basemap.pmtiles and pins/*.geojson from here."
+  value       = "https://${aws_cloudfront_distribution.map.domain_name}"
+}
+
+output "map_bucket_name" {
+  description = "Upload the basemap here once, by hand: aws s3 cp basemap.pmtiles s3://<this>/basemap.pmtiles"
+  value       = aws_s3_bucket.map.bucket
+}
+
+output "geocache_table_name" {
+  value = aws_dynamodb_table.geocache.name
+}
+
+output "geocode_jobs_queue_url" {
+  value = aws_sqs_queue.geocode_jobs.id
+}
+
+output "geocode_dlq_url" {
+  description = "Failed geocode jobs land here. Inspect with: aws sqs receive-message --queue-url <this>"
+  value       = aws_sqs_queue.geocode_dlq.id
+}

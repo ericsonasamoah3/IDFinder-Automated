@@ -9,6 +9,18 @@ export type IDType =
 export type LostStatus = "searching" | "matched" | "recovered";
 export type FoundStatus = "unclaimed" | "matched" | "returned";
 
+// Where the report happened, in one of three shapes. Only the third one costs
+// anything: device GPS and a dragged pin already carry coordinates, so the
+// backend stores them inline and never calls a geocoder. A typed address is
+// resolved asynchronously off the request path.
+//
+// Coordinates sent here are NEVER published. The public map is served from
+// static GeoJSON that has already been snapped to a 250m grid.
+export type LocationInput =
+  | { source: "device"; lat: number; lng: number; accuracy_m: number }
+  | { source: "manual"; lat: number; lng: number }
+  | { source: "geocoded"; address: string };
+
 // Matches the fields returned by GET /IDfinder in idfinder_backend.py.
 // Note: reporter_email, reporter_phone and id_number_hint are NEVER returned
 // by the API. The last-4 hint is withheld because it doubles as the match
@@ -99,6 +111,9 @@ export type CreateRecordInput = {
   description?: string;
   // S3 key returned by the /save Lambda, when a photo was attached.
   photo_key?: string;
+  // Optional throughout. A report with no location still files, still matches,
+  // and still notifies -- it just never gets a pin on the map.
+  location_input?: LocationInput;
 };
 
 export async function createLostID(input: CreateRecordInput): Promise<{ record_id: string }> {

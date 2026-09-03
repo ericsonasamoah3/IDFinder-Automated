@@ -40,10 +40,23 @@ resource "aws_amplify_app" "frontend" {
     # null_resource.amplify_cognito_env below for why.
   }
 
+  # SPA client-side routing (react-router).
+  #
+  # This was `source = "/<*>"` with `status = "404-200"`, which served
+  # index.html for deep links but kept the 404 STATUS on the response --
+  # verified against the live site: GET /report-lost returned 404 with
+  # index.html's body. React still rendered, but a 404 on a real page is wrong
+  # for crawlers, uptime checks and anything that branches on status.
+  #
+  # The regex is Amplify's documented SPA form: rewrite anything WITHOUT a file
+  # extension, and anything whose extension is not a real asset type, to
+  # index.html with a true 200. Listing the extensions matters -- a blanket
+  # rewrite would swallow /assets/*.js and hand the browser HTML where it
+  # expects JavaScript, which blanks the page entirely.
   custom_rule {
-    source = "/<*>"
+    source = "</^[^.]+$|\\.(?!(css|gif|ico|jpg|jpeg|js|png|txt|svg|woff|woff2|ttf|map|json|webp|avif|pmtiles|geojson)$)([^.]+$)/>"
     target = "/index.html"
-    status = "404-200" # SPA client-side routing (react-router)
+    status = "200"
   }
 
   # null_resource.amplify_cognito_env below overwrites this app's env vars
@@ -85,6 +98,9 @@ locals {
     VITE_COGNITO_CLIENT_ID     = aws_cognito_user_pool_client.web.id
     VITE_COGNITO_DOMAIN        = "${aws_cognito_user_pool_domain.main.domain}.auth.${var.aws_region}.amazoncognito.com"
     VITE_COGNITO_REDIRECT_URLS = "${var.local_dev_url},https://${var.github_branch}.${aws_amplify_app.frontend.default_domain}"
+    # The map reads static files from CloudFront only -- never API Gateway,
+    # Lambda or DynamoDB. This is the only endpoint the map page needs.
+    VITE_MAP_CDN = "https://${aws_cloudfront_distribution.map.domain_name}"
   }
 }
 

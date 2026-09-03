@@ -18,9 +18,25 @@ Handles:
                        delivered out-of-band via SMS once a match is
                        confirmed.
 
+Location, for the map layer:
+  A report carries a `location_input` of one of three shapes -- device GPS, a
+  dragged pin, or a typed address. GPS and a dragged pin already hold
+  coordinates, so they are stored inline here: no external call, no added
+  latency. A typed address is NOT geocoded here. The record is saved without
+  coordinates and a job goes to the geocode queue, where idfinder_geocode_worker
+  resolves it and updates the record. That update raises a Streams event which
+  rebuilds the public pin files.
+
+  Geocoding is a call to a third party that can be slow or down, and this is
+  the request path. The same reasoning already moved image archiving onto SQS
+  (see idfinder_save.py). A report must never wait on a metered API.
+
 Environment variables required:
-  TABLE_NAME       - DynamoDB table name (see idfinder_table.tf)
-  MATCH_INDEX_NAME - GSI name used for match lookups (default: match-index)
+  TABLE_NAME         - DynamoDB table name (see terraform/dynamodb.tf)
+  MATCH_INDEX_NAME   - GSI name used for match lookups (default: match-index)
+  GEOCODE_QUEUE_URL  - SQS queue consumed by idfinder_geocode_worker. Optional:
+                       if unset, typed addresses are simply stored unresolved
+                       rather than failing the report.
 """
 
 import json
@@ -36,6 +52,7 @@ from botocore.exceptions import ClientError
 
 TABLE_NAME = os.environ["TABLE_NAME"]
 MATCH_INDEX_NAME = os.environ.get("MATCH_INDEX_NAME", "match-index")
+GEOCODE_QUEUE_URL = os.environ.get("GEOCODE_QUEUE_URL", "")
 # Off by default so you can test the report/match flow without needing SNS
 # SMS sandbox approval first. Matching still runs and records still get
 # marked "matched" -- only the actual SMS send is skipped. Flip to "true"
@@ -49,6 +66,7 @@ MAX_LIST_ITEMS = 500
 dynamodb = boto3.resource("dynamodb")
 table = dynamodb.Table(TABLE_NAME)
 sns = boto3.client("sns")
+sqs = boto3.client("sqs")
 
 ALLOWED_ID_TYPES = {
     "national_id",
@@ -74,6 +92,14 @@ ALLOWED_RECORD_TYPES = {"lost", "found"}
 #                     longer broadcast.
 #   photo_key      -- internal S3 object key, not useful to a browser and not
 #                     something to hand out.
+#   lat / lng      -- the stored coordinate is full precision. The public map
+#                     is served from static GeoJSON that geojson_builder has
+#                     already snapped to a 250m grid; handing out the exact
+#                     position here would defeat that entirely. Precise
+#                     coordinates reach a matched pair by SMS, never by API.
+#   geo_source / geo_accuracy_m / address_raw -- same reasoning. address_raw
+#                     is whatever the reporter typed, which may be far more
+#                     precise than the fuzzed pin.
 #
 # name_on_id: the name printed on the ID itself (from OCR or manual entry).
 # reporter_name/email/phone: whoever is SUBMITTING the report -- the ID's
@@ -179,11 +205,25 @@ def handle_create(event):
 
     table.put_item(Item=record)
 
+    # After the write, so a queue outage can never cost us the record, and
+    # before matching, so a typed address starts resolving while the match
+    # lookup runs.
+    enqueue_geocode(record)
+
     match = find_match(record)
     if match and mark_matched_and_notify(record, match):
         record["status"] = "matched"
 
-    return response(201, {"success": True, "record_id": record["record_id"]})
+    return response(
+        201,
+        {
+            "success": True,
+            "record_id": record["record_id"],
+            # Lets the form tell the reporter their pin is still resolving,
+            # rather than leaving them wondering why the map looks empty.
+            "pin_pending": bool(record.get("address_raw")) and "lat" not in record,
+        },
+    )
 
 
 def build_record(body):
@@ -214,6 +254,7 @@ def build_record(body):
         raise ValidationError("id_type is not a recognised type")
     if not location:
         raise ValidationError("location is required")
+    assert_location_is_coarse(location)
 
     # Matching compares match_key by exact string equality, so an unnormalised
     # hint ("1234 " vs "1234", "ksab" vs "KSAB") silently fails to match.
@@ -232,7 +273,7 @@ def build_record(body):
 
     now = datetime.now(timezone.utc).isoformat()
 
-    return {
+    record = {
         "record_id": str(uuid.uuid4()),
         "record_type": record_type,
         "name_on_id": name_on_id,
@@ -249,6 +290,140 @@ def build_record(body):
         "matched_with": None,
         "created_at": now,
     }
+
+    record.update(build_location_fields(body.get("location_input")))
+    return record
+
+
+# ---------------------------------------------------------------------------
+# Location
+# ---------------------------------------------------------------------------
+
+# A street number followed by a word ("14 Foo Street"), either at the start or
+# after a comma so "Flat 2, 14 Foo Street" is caught too.
+STREET_NUMBER_RE = re.compile(r"(^|,\s*)\d{1,4}[A-Za-z]?\s+[A-Za-z]")
+
+# A full UK postcode identifies roughly fifteen addresses -- finer than the
+# 250m grid the map pins are snapped to. The outward code alone ("SW1A") is
+# district-level and stays allowed.
+FULL_POSTCODE_RE = re.compile(r"\b[A-Za-z]{1,2}\d[A-Za-z\d]?\s*\d[A-Za-z]{2}\b")
+
+
+def assert_location_is_coarse(location):
+    """Keep the public free-text location no sharper than the public pin.
+
+    `location` is in PUBLIC_FIELDS: it is required at submit and returned to
+    any caller, signed in or not. Snapping the coordinate to a 250m grid while
+    publishing "outside 14 Foo Street" in the very next field protects
+    nothing -- the precise location is still public, just in a different
+    field. This field is an AREA, and is validated as one.
+
+    Deliberately a rejection rather than a silent truncation: quietly editing
+    what someone typed leaves them believing the precise text was recorded.
+    """
+    if STREET_NUMBER_RE.search(location):
+        raise ValidationError(
+            "Please give an area rather than a street address -- a "
+            "neighbourhood, landmark or street name without the number. "
+            "Exact positions are shared only once a match is confirmed."
+        )
+    if FULL_POSTCODE_RE.search(location):
+        raise ValidationError(
+            "Please leave off the full postcode -- the first half on its own "
+            "(e.g. SW1A) is fine. Exact positions are shared only once a "
+            "match is confirmed."
+        )
+
+
+def build_location_fields(location_input):
+    """Turn the form's location_input into stored attributes.
+
+    Three shapes, and only one of them costs anything:
+
+      {"source": "device", "lat": .., "lng": .., "accuracy_m": ..}
+      {"source": "manual", "lat": .., "lng": ..}
+      {"source": "geocoded", "address": ".."}
+
+    device and manual already carry coordinates, so they are stored inline.
+    geocoded stores the raw address and leaves coordinates absent -- the
+    record is enqueued for the geocode worker by handle_create().
+
+    Anything malformed returns {} rather than raising. A location is a
+    nice-to-have on a report; refusing to file a lost ID because a browser
+    sent a odd accuracy value would be the wrong trade.
+    """
+    if not isinstance(location_input, dict):
+        return {}
+
+    source = location_input.get("source")
+
+    if source in ("device", "manual"):
+        lat = to_coord(location_input.get("lat"))
+        lng = to_coord(location_input.get("lng"))
+        if lat is None or lng is None:
+            return {}
+        if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+            return {}
+        # 0,0 is Null Island in the Gulf of Guinea. It is what a failed
+        # geolocation call looks like far more often than a real position.
+        if lat == 0 and lng == 0:
+            return {}
+
+        fields = {
+            "lat": Decimal(str(lat)),
+            "lng": Decimal(str(lng)),
+            "geo_source": source,
+        }
+
+        accuracy = to_coord(location_input.get("accuracy_m"))
+        if source == "device" and accuracy is not None and accuracy >= 0:
+            fields["geo_accuracy_m"] = Decimal(str(round(accuracy)))
+
+        return fields
+
+    if source == "geocoded":
+        address = (location_input.get("address") or "").strip()
+        if not address:
+            return {}
+        # No coordinates and no geo_source yet: the worker sets both when it
+        # resolves. Absent geo_source is how "unpinned" is represented.
+        return {"address_raw": address[:250]}
+
+    return {}
+
+
+def to_coord(value):
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    # NaN and the infinities all survive float() and then poison every
+    # comparison downstream, so screen them out here.
+    if parsed != parsed or parsed in (float("inf"), float("-inf")):
+        return None
+    return parsed
+
+
+def enqueue_geocode(record):
+    """Ask the geocode worker to resolve this record's typed address.
+
+    Best-effort by design. If the queue is unset or the send fails, the report
+    is already saved -- it simply has no pin. Failing the request here would
+    lose a lost-ID report over a map feature, which is the wrong priority.
+    """
+    address = record.get("address_raw")
+    if not address or not GEOCODE_QUEUE_URL:
+        return
+
+    try:
+        sqs.send_message(
+            QueueUrl=GEOCODE_QUEUE_URL,
+            MessageBody=json.dumps(
+                {"record_id": record["record_id"], "address": address}
+            ),
+        )
+    except ClientError as e:
+        print(f"Could not enqueue geocode for {record['record_id']}: {e}")
 
 
 def is_valid_phone(phone):

@@ -173,6 +173,24 @@ resource "aws_iam_role_policy" "github_deploy" {
           "sqs:*",
 
           # ---------------------------------------------------------
+          # CloudFront
+          # ---------------------------------------------------------
+          # Map delivery (terraform/map_delivery.tf): the distribution, its
+          # origin access control, and the cache / response-headers policies.
+          # Same lesson as the SQS entry above -- adding a service to the
+          # stack without adding it here means CI plans fine and then fails
+          # the apply with AccessDenied.
+          "cloudfront:*",
+
+          # ---------------------------------------------------------
+          # CloudWatch (metrics and alarms)
+          # ---------------------------------------------------------
+          # The billing alarm in terraform/billing_alarm.tf. NOT covered by
+          # "logs:*" below -- alarms live under the cloudwatch: prefix, logs
+          # only covers log groups and streams.
+          "cloudwatch:*",
+
+          # ---------------------------------------------------------
           # SSM Parameter Store
           # ---------------------------------------------------------
           "ssm:*",
