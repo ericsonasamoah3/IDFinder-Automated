@@ -66,8 +66,24 @@ resource "aws_amplify_app" "frontend" {
   # declared above, the null_resource does NOT re-run because its trigger
   # hash is unchanged, and the deployed frontend silently loses its Cognito
   # config -- sign-in breaks with no error at apply time.
+  # access_token is ignored for a different reason, and it is the one that has
+  # been failing CI. Terraform stores the token in state and diffs it like any
+  # other attribute, so whenever the value CI passes differs from the value the
+  # last local apply stored, the plan contains an access_token change. Applying
+  # that change is an Amplify UpdateApp carrying the token, and Amplify
+  # validates it -- a stale or wrong secret comes back as BadRequestException,
+  # which is a hard apply failure. Confirmed in CloudTrail: UpdateApp ->
+  # BadRequestException from the GitHubActions role, on a plan that had passed.
+  #
+  # The token is a bootstrap credential. Amplify needs it once, to establish the
+  # repository connection; after that the connection stands on its own (the
+  # webhook build for this very commit succeeded). Rotating it, or having CI
+  # hold a different one, should not be able to break every deploy.
+  #
+  # To genuinely rotate it: update the value here AND in the GH_ACCESS_TOKEN
+  # secret, then remove this from ignore_changes for one apply.
   lifecycle {
-    ignore_changes = [environment_variables]
+    ignore_changes = [environment_variables, access_token]
   }
 }
 
