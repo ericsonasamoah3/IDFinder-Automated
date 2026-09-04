@@ -43,7 +43,23 @@ let protocolRegistered = false;
 
 export function registerPmtilesProtocol(): void {
   if (protocolRegistered) return;
-  maplibregl.addProtocol("pmtiles", new Protocol().tile);
+
+  // `tilev4`, NOT `tile`.
+  //
+  // pmtiles ships two handlers. `tilev4` is the promise-based one matching
+  // MapLibre v5+'s AddProtocolAction: (params, abortController) => Promise.
+  // `tile` is a v3-compatibility shim that takes a callback and returns
+  // `{cancel}`.
+  //
+  // `tile` is typed as the union `V3OrV4Protocol`, so passing it to
+  // addProtocol type-checks cleanly against maplibre v6 -- and then fails
+  // silently at runtime. MapLibre awaits a non-thenable `{cancel}`, gets
+  // undefined where the TileJSON should be, and builds a source with no tile
+  // URLs. The archive's header is still fetched (the shim starts that itself),
+  // so the network tab shows one hopeful 206 and then nothing: no tile
+  // requests, no error event, just the background layer on an empty canvas.
+  const protocol = new Protocol();
+  maplibregl.addProtocol("pmtiles", protocol.tilev4);
   protocolRegistered = true;
 }
 

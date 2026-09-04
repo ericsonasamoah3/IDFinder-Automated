@@ -154,6 +154,14 @@ export default function MapPage() {
       "bottom-right"
     );
 
+    // MapLibre reports source/tile/style failures through this event and
+    // nowhere else. Without a listener a broken basemap looks exactly like an
+    // empty one -- the background layer paints, no tile is ever requested, and
+    // the console stays clean. That cost real debugging time; keep it.
+    map.on("error", (e) => {
+      console.error("[map]", e.error?.message ?? e);
+    });
+
     map.on("load", () => {
       for (const kind of ["lost", "found"] as const) {
         map.addSource(kind, {
@@ -350,7 +358,21 @@ export default function MapPage() {
 
   return (
     <div className="relative h-screen w-full overflow-hidden bg-ink">
-      <div ref={container} className="absolute inset-0" />
+      {/* h-full, NOT `absolute inset-0`.
+          MapLibre's stylesheet declares `.maplibregl-map { position: relative }`
+          and applies that class to this very element. Tailwind's `.absolute` has
+          identical specificity, so the winner is decided purely by stylesheet
+          order -- and MapLibre's CSS is imported from lib/mapStyle.ts, which
+          lives in the lazily-loaded map chunk and therefore lands AFTER the main
+          Tailwind bundle. `relative` won, `inset-0` stopped contributing any
+          height, the element collapsed to 0px, and the canvas fell back to its
+          300px intrinsic default: a full-width sliver of map above an empty
+          background.
+          Height here must not depend on positioning. MapLibre sets no height
+          rule of its own, so h-full resolves against the h-screen parent and is
+          immune to load order. (LocationPicker's mini-map was never affected --
+          it uses an explicit h-56.) */}
+      <div ref={container} className="h-full w-full" />
 
       {/* Top bar */}
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 bg-gradient-to-b from-ink/85 to-transparent px-4 pb-10 pt-4 sm:px-6">
