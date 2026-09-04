@@ -24,7 +24,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       # If "Configure AWS credentials" ever starts failing again, the usual
       # cause is the OIDC subject in terraform/iam.tf drifting from the claim
@@ -33,13 +33,13 @@ jobs:
       # here that curls $ACTIONS_ID_TOKEN_REQUEST_URL and base64-decodes the
       # JWT payload.
       - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: "1.15.8"
 
