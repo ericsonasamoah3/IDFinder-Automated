@@ -261,7 +261,8 @@ def build_record(body):
     # Strip separators, upper-case, take the last 4.
     #
     # Alphanumeric, NOT digits-only: plenty of ID numbers end in letters -- a
-    # UK driving licence like ASAMO712049EK9AB ends "EK9AB". Stripping to
+    # UK driving licence like MORGA753116SM9IJ (the DVLA's published specimen
+    # number, not a real person's) ends "SM9IJ". Stripping to
     # digits turned those into an empty hint and rejected the submission with
     # "id_number_hint is required", on a value the OCR had just auto-filled.
     id_number_hint = re.sub(r"[^A-Za-z0-9]", "", id_number_hint).upper()[-4:]

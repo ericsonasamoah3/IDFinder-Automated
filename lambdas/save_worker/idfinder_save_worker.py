@@ -3,8 +3,8 @@ SQS consumer for image-save jobs enqueued by idfinder_save.py.
 
 Writes the archive layout, keyed by the name printed on the ID:
 
-    lost/ERICSON_KOFI_ASAMOAH.jpg          <- the photo
-    lost/json/ERICSON_KOFI_ASAMOAH.json    <- the OCR output for it
+    lost/JOHN_ADAM_SMITH.jpg               <- the photo
+    lost/json/JOHN_ADAM_SMITH.json         <- the OCR output for it
     found/JANE_DOE.jpg
     found/json/JANE_DOE.json
 

@@ -119,7 +119,7 @@ def lambda_handler(event, context):
 def safe_filename(name):
     """Turn the name printed on an ID into a safe, readable S3 key segment.
 
-    "Ericson Kofi Asamoah" -> "ERICSON_KOFI_ASAMOAH"
+    "John Adam Smith" -> "JOHN_ADAM_SMITH"
 
     Accents are folded rather than dropped ("Munoz" from "Muñoz") so the key
     stays recognisable. Anything left that isn't alphanumeric becomes an
